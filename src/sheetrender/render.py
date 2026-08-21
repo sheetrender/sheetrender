@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import io
-import math
 import logging
+import math
 import time
-from typing import NamedTuple
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 from sheetrender.config import get_config
@@ -105,9 +105,9 @@ _FONTS_READY_JS = (
 
 # How the diagonal PREVIEW mark is tinted, in both the CSS and the PDF paths.
 # Kept as one pair of numbers because the two have to look like the same mark:
-# a preview switched between the HTML and PDF panes of the same wizard step
-# should not appear to change. A wash, not lettering — low enough that the
-# design underneath reads normally through it.
+# the same document previewed as HTML and as PDF should not appear to change.
+# A wash, not lettering — low enough that the design underneath reads normally
+# through it.
 _PREVIEW_STAMP_GRAY = (0.47, 0.47, 0.47)
 _PREVIEW_STAMP_ALPHA = 0.13
 
@@ -166,17 +166,15 @@ def inject_watermark(html: str, watermark_html: str) -> str:
 
 
 def inject_preview_watermark(html: str, *, text: str = "PREVIEW") -> str:
-    """Mark an HTML preview response with a diagonal PREVIEW overlay.
+    """Mark HTML output with a diagonal overlay (default "PREVIEW").
 
-    For the HTML preview branch only. PDF previews are stamped after rendering
-    by stamp_preview_watermark, which template CSS cannot touch; this injected
-    version is the best available for a response that stays HTML, and it can be
-    defeated by a template that outranks it on specificity. That is an accepted
-    limit: the HTML branch hands back markup the recipient already controls, so
-    it can only ever deter, while the PDF is the artifact worth protecting.
+    For output that stays HTML. PDFs are better served by
+    stamp_preview_watermark, which stamps after rendering so template CSS
+    cannot touch it; this injected version lives in the same document as the
+    template's own styles and can be out-styled by them, so treat it as a
+    label, not a guarantee.
 
-    Independent of inject_watermark: that one injects caller-supplied branding
-    on deliverable output, while this one marks non-deliverable previews.
+    Independent of inject_watermark, which injects caller-supplied branding.
     """
     return _inject_before_body(html, _preview_watermark_html(text))
 
@@ -228,7 +226,7 @@ def strip_author_page_rules(html: str) -> str:
     Page size and margins are controlled by the API (they become Playwright
     ``page.pdf(format=..., margin=...)`` options). Chromium treats an author
     ``@page { margin: ... }`` as overriding those pdf() margins, so an
-    AI-generated design that emits ``@page { size: A4; margin: 0 }`` silently
+    template that emits ``@page { size: A4; margin: 0 }`` silently
     defeats the user's margin and page-size choices. Stripping the rule lets the
     pdf() options govern geometry. Brace-aware so nested margin-box at-rules
     (e.g. ``@page { @top-center { ... } }``) are removed whole. Only ``<style>``
@@ -624,10 +622,10 @@ async def render_pdf(
     opts = _pdf_options(page_settings)
 
     async def _render() -> bytes:
-        # One-off renders (previews, page counts) come from different
-        # accounts, so each gets a throwaway context: sharing one across
-        # tenants would share cookies, HTTP cache, and other context state.
-        # Context reuse stays inside BatchRenderer, which is scoped to a job.
+        # One-off renders may come from unrelated callers, so each gets a
+        # throwaway context: sharing one would share cookies, HTTP cache, and
+        # other context state across documents that should not see each other.
+        # Context reuse stays inside BatchRenderer, which is scoped to a batch.
         holder = _ContextHolder()
         try:
             return await _render_page_pdf(holder, html, opts, timing=timing)
@@ -882,7 +880,7 @@ def stamp_pdf_page_numbers(pdf_bytes: bytes, *, position: str = "center", fmt: s
     """
     import pikepdf
     from pikepdf import Name
-    from pikepdf.canvas import Canvas, Color, Helvetica, Text, WHITE
+    from pikepdf.canvas import WHITE, Canvas, Color, Helvetica, Text
 
     pdf = pikepdf.open(io.BytesIO(pdf_bytes))
     overlays = []
@@ -938,6 +936,7 @@ def apply_pdf_metadata(pdf_bytes: bytes, title: str | None = None) -> bytes:
     outputs should carry the document's name and ours instead.
     """
     import pikepdf
+
     from sheetrender import __version__
 
     with pikepdf.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -956,6 +955,7 @@ def _pdf_version_key(version: str) -> tuple[int, ...]:
 
 def _coalesce_identical_streams(pdf) -> int:
     import hashlib
+
     import pikepdf
 
     canonical = {}

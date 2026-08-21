@@ -9,12 +9,15 @@ items like invoices and statements. It is the exact rendering engine behind
 library and CLI.
 
 ```sh
+git clone https://github.com/sheetrender/sheetrender && cd sheetrender
 uvx sheetrender batch examples/invoice/template.html examples/invoice/data.csv \
   -o out/ --group-by invoice_no --filename "{{ invoice_no }}.pdf" --zip invoices.zip
 ```
 
 That renders one invoice per `invoice_no`, with the group's rows available to
 the template as `items`, names each file from a template, and zips the stack.
+(The clone is only for the example files — `uvx sheetrender` itself needs no
+install at all.)
 
 ## Why this exists
 
@@ -46,8 +49,12 @@ uv add sheetrender          # or: pip install sheetrender
 uv run playwright install chromium
 ```
 
-Or run the CLI without installing anything: `uvx sheetrender --help`
-(you still need `playwright install chromium` once).
+Or run the CLI without installing anything: `uvx sheetrender --help`. You
+still need Chromium once; without a local playwright on PATH that's
+
+```sh
+uvx --from playwright playwright install chromium
+```
 
 ## CLI
 
@@ -63,7 +70,7 @@ sheetrender batch template.html data.csv -o out/ \
   --filename "{{ customer }}-{{ invoice_no }}.pdf" \
   --merge all.pdf --page-numbers
 
-# Single document from a JSON context (or --set key=value)
+# Single document from a JSON object file (or --set key=value)
 sheetrender render letter.html -o letter.pdf --data row.json
 
 # What's in this file, and what will the template see?
@@ -73,27 +80,33 @@ sheetrender inspect data.xlsx
 sheetrender thumbnail template.html -o thumb.png --data row.json
 ```
 
-Page geometry: `--page-size A4|Letter|Legal --landscape --margin 12mm`.
-Watermarking: `--watermark-html '<div class="foot">DRAFT</div>'` injects your
-snippet on every page. Both `.csv` and `.xlsx` inputs work everywhere a data
-file is accepted.
+Page geometry: `--page-size A3|A4|A5|Letter|Legal|Tabloid --landscape
+--margin 12mm`. Watermarking (`batch` only):
+`--watermark-html '<div style="position:fixed;bottom:0">DRAFT</div>'` injects
+your snippet before `</body>` — use `position:fixed` if it should repeat on
+every printed page rather than sit at the end of the document. Data files are
+`.csv` or `.xlsx`; the single-document `--data` flag takes a JSON object file.
 
 ## Python API
 
 ```python
 import asyncio
+from pathlib import Path
+
 import sheetrender as sr
 
 async def main() -> None:
+    out = Path("out")
+    out.mkdir(exist_ok=True)
     await sr.start_browser()
     try:
-        template = sr.compile_template(open("template.html").read())
+        template = sr.compile_template(Path("template.html").read_text())
         parsed = sr.parse_csv("data.csv")
         async with sr.render_context() as renderer:
             for i, row in enumerate(sr.iter_rows("data.csv", parsed["columns"])):
                 html = sr.render_compiled(template, row)
                 pdf = await renderer.render_pdf(html)
-                open(f"out/row_{i:04}.pdf", "wb").write(pdf)
+                (out / f"row_{i:04}.pdf").write_bytes(pdf)
     finally:
         await sr.stop_browser()
 
@@ -123,10 +136,10 @@ crash mid-batch):
 | `money2` | `$1,234.50` | cents |
 | `money_k` | `$234K`, `$1.2M` | compact, negatives as `-$…` |
 | `comma` / `comma2` | `1,234` / `1,234.50` | no currency symbol |
-| `pct` | `12.5%` | |
+| `pct` | `89%` | rounds to whole percent |
 | `bar_width` | `0`–`100` | clamped, for CSS bar charts |
-| `sign_class` | `positive` / `negative` | for conditional styling |
-| `yesno_class` | `yes` / `no` | |
+| `sign_class` | `positive` / `negative` | `{{ actual \| sign_class(target) }}` — compares two values |
+| `yesno_class` | `""` / `no` | empty string for truthy (default styling), `no` for falsy |
 | `sumcol` | `{{ items \| sumcol('amount') \| money2 }}` | Decimal-exact column sum; strips `$€£` and commas, treats `(123)` as negative |
 
 Rendering is deterministic across machines: the browser context is pinned to
@@ -169,7 +182,9 @@ configure(RenderConfig(
 ))
 ```
 
-Call `configure()` once, before the first render.
+Call `configure()` once, before `start_browser()` (or the first render, which
+starts it) — `concurrency` sizes the browser's gate at startup and changes
+after that are ignored.
 
 ## Development
 

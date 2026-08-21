@@ -7,7 +7,6 @@ from typing import Iterable
 
 from sheetrender.sheets import iter_rows
 
-
 RESERVED_CONTEXT_KEYS = {"items", "item_count", "group_key"}
 
 _GROUP_NAME_HINT = re.compile(

@@ -10,6 +10,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # The tag is the release request; the version in pyproject is what
+      # actually ships. Refuse to publish a mismatch.
+      - run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(uv version --short)"
+          [ "$tag" = "$version" ] || { echo "tag v$tag != project version $version" >&2; exit 1; }
       - run: uv build
       - uses: actions/upload-artifact@v4
         with:

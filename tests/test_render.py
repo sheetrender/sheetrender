@@ -2,9 +2,9 @@ import asyncio
 import io
 import zipfile
 from contextlib import asynccontextmanager as _acm
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class _MockGate:
@@ -68,7 +68,7 @@ async def test_render_pdf():
 async def test_preview_stamp_repeats_on_every_page():
     """The whole mechanism is Blink repeating position:fixed on each printed page.
 
-    Real Chromium (backend/scripts/test.sh --render); the string tests above
+    Real Chromium (scripts/test.sh --render); the string tests above
     would happily pass on a stamp that only ever rendered on page one.
     """
     try:
@@ -121,7 +121,7 @@ async def test_template_css_cannot_remove_the_preview_stamp(name, css):
     """Real Chromium: the template gets to fight, and must lose.
 
     The stamp is painted onto the finished PDF, so no rule in the document can
-    reach it. Run with backend/scripts/test.sh --render.
+    reach it. Run with scripts/test.sh --render.
     """
     try:
         from playwright.async_api import async_playwright  # noqa: F401
@@ -285,6 +285,7 @@ def test_inject_watermark_before_body_close():
 def test_stamp_pdf_page_numbers_are_global():
     import pikepdf
     from pypdf import PdfReader
+
     from sheetrender.render import stamp_pdf_page_numbers
 
     source = pikepdf.Pdf.new()
@@ -304,8 +305,9 @@ def test_stamp_pdf_page_numbers_are_global():
 
 
 def _write_pdf_with_image(path, image_bytes, *, min_version=None):
-    import pikepdf
     import zlib
+
+    import pikepdf
 
     pdf = pikepdf.Pdf.new()
     page = pdf.add_blank_page(page_size=(72, 72))
@@ -329,8 +331,9 @@ def _write_pdf_with_image(path, image_bytes, *, min_version=None):
 
 
 def _write_pdf_with_skia_image(path, image_bytes):
-    import pikepdf
     import zlib
+
+    import pikepdf
 
     pdf = pikepdf.Pdf.new()
     page = pdf.add_blank_page(page_size=(72, 72))
@@ -400,8 +403,9 @@ def test_merge_pdfs_falls_back_when_optimization_fails(tmp_path, caplog):
 
 
 def test_merge_pdfs_deduplicates_identical_streams(tmp_path):
-    import pikepdf
     import zlib
+
+    import pikepdf
 
     from sheetrender.render import merge_pdfs
 
@@ -426,8 +430,9 @@ def test_merge_pdfs_deduplicates_identical_streams(tmp_path):
 
 
 def test_merge_pdfs_deduplicates_skia_images_with_indirect_children(tmp_path):
-    import pikepdf
     import zlib
+
+    import pikepdf
 
     from sheetrender.render import merge_pdfs
 
@@ -448,8 +453,9 @@ def test_merge_pdfs_deduplicates_skia_images_with_indirect_children(tmp_path):
 
 
 def test_merge_pdfs_keeps_distinct_streams(tmp_path):
-    import pikepdf
     import zlib
+
+    import pikepdf
 
     from sheetrender.render import merge_pdfs
 
@@ -468,8 +474,9 @@ def test_merge_pdfs_keeps_distinct_streams(tmp_path):
 
 
 def test_merge_pdfs_keeps_same_bytes_with_different_stream_dictionaries(tmp_path):
-    import pikepdf
     import zlib
+
+    import pikepdf
 
     from sheetrender.render import merge_pdfs
 
@@ -960,8 +967,9 @@ async def test_priority_gate_drain_excludes_new_acquires():
 
 
 def test_should_recycle_check_by_count():
-    from sheetrender.render import _should_recycle_check
     import time
+
+    from sheetrender.render import _should_recycle_check
 
     now = time.monotonic()
     assert _should_recycle_check(300, now, 300, 30) is True
@@ -969,8 +977,9 @@ def test_should_recycle_check_by_count():
 
 
 def test_should_recycle_check_by_age():
-    from sheetrender.render import _should_recycle_check
     import time
+
+    from sheetrender.render import _should_recycle_check
 
     old_time = time.monotonic() - 31 * 60
     assert _should_recycle_check(0, old_time, 300, 30) is True

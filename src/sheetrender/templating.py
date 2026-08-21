@@ -183,8 +183,8 @@ def render_row(html: str, row: dict) -> str:
 
 
 def render_text(template_str: str, row: dict) -> str:
-    """Render a plain-text template (filenames, email subjects/bodies) without
-    HTML autoescaping — entity-escaped output would corrupt non-HTML strings."""
+    """Render a plain-text template (filename patterns and other non-HTML
+    strings) without autoescaping — entity-escaped output would corrupt them."""
     try:
         return get_env(autoescape=False).from_string(template_str).render(**row)
     except Exception as exc:

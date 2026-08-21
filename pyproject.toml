@@ -1,6 +1,6 @@
 [project]
 name = "sheetrender"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Spreadsheet + HTML template in, a PDF per row out. The batch rendering engine behind sheetrender.com."
 readme = "README.md"
 license = "MIT"
@@ -54,15 +54,23 @@ Changelog = "https://github.com/sheetrender/sheetrender/blob/main/CHANGELOG.md"
 dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
-  "ruff>=0.12",
+  # Pinned exact: CI runs `ruff check`, and a floating linter turns unrelated
+  # PRs red when a new ruff release adds rules.
+  "ruff==0.16.4",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
+[tool.ruff.lint]
+# Explicit selection so the rule set cannot move underneath CI. Pycodestyle
+# errors, pyflakes, and import order; the engine's deliberate broad-except
+# robustness patterns are out of scope.
+select = ["E4", "E7", "E9", "F", "I"]
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

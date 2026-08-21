@@ -469,7 +469,7 @@ wheels = [
 
 [[package]]
 name = "sheetrender"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
@@ -505,7 +505,7 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
-    { name = "ruff", specifier = ">=0.12" },
+    { name = "ruff", specifier = "==0.16.4" },
 ]
 
 [[package]]
