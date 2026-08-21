@@ -48,7 +48,7 @@ sheetrender = "sheetrender.cli:main"
 Homepage = "https://sheetrender.com"
 Source = "https://github.com/sheetrender/sheetrender"
 Issues = "https://github.com/sheetrender/sheetrender/issues"
-Changelog = "https://github.com/sheetrender/sheetrender/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/sheetrender/sheetrender/blob/master/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
