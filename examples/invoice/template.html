@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice {{ invoice_no }}</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    color: #1d2129;
+    font-family: 'Inter', 'Noto Sans', sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sheet { padding: 22mm 18mm; }
+
+  .masthead { display: flex; justify-content: space-between; align-items: flex-start; }
+  .from .name { font-size: 17px; font-weight: 700; letter-spacing: 0.01em; }
+  .from .meta { margin-top: 4px; font-size: 9.5px; line-height: 1.6; color: #6b7280; }
+  .stamp { text-align: right; }
+  .stamp .kind {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.18em;
+    text-transform: uppercase; color: #2563eb;
+  }
+  .stamp .no { margin-top: 2px; font-size: 15px; font-weight: 700; }
+  .stamp .dates { margin-top: 6px; font-size: 9.5px; line-height: 1.6; color: #6b7280; }
+
+  .billto { margin-top: 14mm; font-size: 10.5px; line-height: 1.65; }
+  .billto .label {
+    font-size: 8.5px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: #9ca3af; margin-bottom: 3px;
+  }
+  .billto .who { font-weight: 600; font-size: 12px; }
+
+  table { width: 100%; margin-top: 10mm; border-collapse: collapse; font-size: 10.5px; }
+  th {
+    text-align: left; font-size: 8.5px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #9ca3af; padding: 0 8px 6px 0;
+    border-bottom: 1.5px solid #1d2129;
+  }
+  th.num, td.num { text-align: right; padding-right: 0; }
+  td { padding: 8px 8px 8px 0; border-bottom: 1px solid #e5e7eb; }
+
+  .totals { margin-top: 8px; display: flex; justify-content: flex-end; }
+  .totals .row { display: flex; gap: 32px; font-size: 12px; padding: 6px 0; }
+  .totals .grand { font-weight: 700; font-size: 14px; border-top: 2px solid #1d2129; }
+
+  .foot { margin-top: 16mm; font-size: 9.5px; line-height: 1.7; color: #6b7280; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="masthead">
+    <div class="from">
+      <div class="name">Studio North</div>
+      <div class="meta">14 Founders Way, Portland, OR 97202<br>studio@example.com</div>
+    </div>
+    <div class="stamp">
+      <div class="kind">Invoice</div>
+      <div class="no">{{ invoice_no }}</div>
+      <div class="dates">Issued {{ invoice_date }}<br>Due {{ due_date }}</div>
+    </div>
+  </div>
+
+  <div class="billto">
+    <div class="label">Billed to</div>
+    <div class="who">{{ customer }}</div>
+    {{ address_line1 }}<br>{{ address_line2 }}<br>{{ contact_email }}
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Description</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.description }}</td>
+        <td class="num">{{ item.qty }}</td>
+        <td class="num">{{ item.unit_price }}</td>
+        <td class="num">{{ item.line_total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row grand"><span>Total due</span><span>{{ items | sumcol('line_total') | money2 }}</span></div>
+  </div>
+
+  <div class="foot">
+    Payment is due within 30 days by bank transfer. Questions about this
+    invoice? Reply to studio@example.com and reference {{ invoice_no }}.
+  </div>
+</div>
+</body>
+</html>
