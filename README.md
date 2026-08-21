@@ -3,9 +3,9 @@
 **Spreadsheet + HTML template in, a stack of PDFs out.**
 
 SheetRender turns a CSV or XLSX file and an HTML template into one
-well-paginated PDF per row — or per group of rows, for documents with line
-items like invoices and statements. It is the exact rendering engine behind
-[sheetrender.com](https://sheetrender.com), extracted as a standalone MIT
+well-paginated PDF per row, or per group of rows for documents with line items
+like invoices and statements. It's the same rendering engine that runs
+[sheetrender.com](https://sheetrender.com), pulled out as a standalone MIT
 library and CLI.
 
 ```sh
@@ -16,31 +16,32 @@ uvx sheetrender batch examples/invoice/template.html examples/invoice/data.csv \
 
 That renders one invoice per `invoice_no`, with the group's rows available to
 the template as `items`, names each file from a template, and zips the stack.
-(The clone is only for the example files — `uvx sheetrender` itself needs no
-install at all.)
+(The clone is only there for the example files. `uvx sheetrender` itself needs
+no install at all.)
 
 ## Why this exists
 
-Every "generate PDFs from a spreadsheet" recipe on the internet glues a
-headless browser to a for-loop and hopes. This engine has rendered documents
-in production for a long time, and the parts that took real debugging are the
-parts you get for free:
+Every "generate PDFs from a spreadsheet" recipe I found glues a headless
+browser to a for-loop and hopes. That holds up fine for fifty rows. Somewhere
+past a few thousand it starts leaking memory, or it wedges, or a webfont request
+stalls and takes a render slot down with it. I hit all of those running this in
+production, and the fixes are what's in here:
 
-- **Chromium rendering with lifecycle management** — a shared browser with a
-  priority-aware concurrency gate, recycled after N renders or N minutes, so
-  thousand-row batches don't leak memory or wedge.
-- **Print CSS that behaves** — margins, page sizes, backgrounds, webfont
-  readiness with a bounded wait (a stalled font fetch degrades to fallback
-  fonts instead of hanging a render slot).
-- **Safe templating over untrusted data** — sandboxed Jinja2 with
-  `StrictUndefined` (typos fail loudly instead of rendering blanks) and
-  autoescaping on.
-- **HTML sanitization + network egress control** — templates are sanitized
-  with [nh3](https://github.com/messense/nh3), and the browser context blocks
-  all network requests except an allowlist (Google Fonts by default).
-- **Batch ergonomics** — filename templates with cross-platform sanitization
-  and de-duplication, row grouping with auto-detection, merged PDFs with
-  stamped page numbers, zip output, thumbnails, PDF metadata.
+- The browser is shared across renders and sits behind a priority-aware
+  concurrency gate. It gets recycled after N renders or N minutes, so a
+  thousand-row batch doesn't leak or wedge.
+- Print CSS behaves. Margins, page sizes, backgrounds, and a bounded wait for
+  webfonts, so a font fetch that never returns degrades to fallback fonts
+  instead of hanging the render.
+- Jinja2 runs sandboxed with `StrictUndefined` and autoescaping on. Misspell a
+  column name and the render fails loudly instead of handing you 800 documents
+  with a hole in them.
+- Templates are sanitized with [nh3](https://github.com/messense/nh3), and the
+  browser context blocks every network request except an allowlist (Google
+  Fonts by default).
+- Filenames come from templates, sanitized per-platform and de-duplicated. Rows
+  group with auto-detection, PDFs merge with stamped page numbers, and there's
+  zip output, thumbnails and PDF metadata.
 
 ## Install
 
@@ -49,8 +50,8 @@ uv add sheetrender          # or: pip install sheetrender
 uv run playwright install chromium
 ```
 
-Or run the CLI without installing anything: `uvx sheetrender --help`. You
-still need Chromium once; without a local playwright on PATH that's
+Or run the CLI without installing anything: `uvx sheetrender --help`. You still
+need Chromium once. Without a local playwright on PATH, that's
 
 ```sh
 uvx --from playwright playwright install chromium
@@ -81,11 +82,15 @@ sheetrender thumbnail template.html -o thumb.png --data row.json
 ```
 
 Page geometry: `--page-size A3|A4|A5|Letter|Legal|Tabloid --landscape
---margin 12mm`. Watermarking (`batch` only):
+--margin 12mm`.
+
+Watermarking works on `batch` only.
 `--watermark-html '<div style="position:fixed;bottom:0">DRAFT</div>'` injects
-your snippet before `</body>` — use `position:fixed` if it should repeat on
-every printed page rather than sit at the end of the document. Data files are
-`.csv` or `.xlsx`; the single-document `--data` flag takes a JSON object file.
+your snippet before `</body>`. Use `position:fixed` if you want it on every
+printed page; without it the snippet just sits at the end of the document.
+
+Data files are `.csv` or `.xlsx`. The single-document `--data` flag takes a JSON
+object file.
 
 ## Python API
 
@@ -121,14 +126,14 @@ exported from the package root.
 
 ## Templates
 
-Templates are plain HTML + CSS rendered by Chromium's print pipeline, with
-Jinja2 for data. Each row's columns become top-level variables — a header of
+Templates are plain HTML and CSS rendered by Chromium's print pipeline, with
+Jinja2 for data. Each row's columns become top-level variables, so a header of
 `Invoice No.` is available as `{{ invoice_no }}` (`sheetrender inspect` shows
-the exact mapping). The environment is sandboxed, autoescaped, and strict:
+the exact mapping). The environment is sandboxed, autoescaped and strict:
 referencing a column that doesn't exist is an error, not a silent blank.
 
-Null-safe formatting filters (bad input renders as an empty string, never a
-crash mid-batch):
+The formatting filters are null-safe, so bad input renders as an empty string
+rather than crashing halfway through a batch:
 
 | Filter | Example output | Notes |
 |---|---|---|
@@ -138,34 +143,35 @@ crash mid-batch):
 | `comma` / `comma2` | `1,234` / `1,234.50` | no currency symbol |
 | `pct` | `89%` | rounds to whole percent |
 | `bar_width` | `0`–`100` | clamped, for CSS bar charts |
-| `sign_class` | `positive` / `negative` | `{{ actual \| sign_class(target) }}` — compares two values |
+| `sign_class` | `positive` / `negative` | takes the value to compare against: `{{ actual \| sign_class(target) }}` |
 | `yesno_class` | `""` / `no` | empty string for truthy (default styling), `no` for falsy |
-| `sumcol` | `{{ items \| sumcol('amount') \| money2 }}` | Decimal-exact column sum; strips `$€£` and commas, treats `(123)` as negative |
+| `sumcol` | `{{ items \| sumcol('amount') \| money2 }}` | Decimal-exact column sum. Strips `$€£` and commas, treats `(123)` as negative |
 
-Rendering is deterministic across machines: the browser context is pinned to
-`en-US` / UTC, so dates and numbers format the same everywhere.
+Rendering is deterministic across machines. The browser context is pinned to
+`en-US` and UTC, so dates and numbers format the same everywhere.
 
 ### Grouped documents
 
 `--group-by customer_id` (or `grouped_render_units` in Python) renders one
 document per group. The template sees the first row's fields at the top level
-plus three reserved names: `items` (every row in the group), `item_count`, and
+plus three reserved names: `items` (every row in the group), `item_count` and
 `group_key`. See [`examples/invoice/`](examples/invoice/) for a complete
 line-item invoice.
 
 ## Security model
 
-Designed for rendering templates you didn't write:
+This is built to render templates you didn't write yourself:
 
-- Jinja2 runs in `SandboxedEnvironment` — no attribute traversal to
-  dangerous internals, autoescape on.
-- Template HTML is sanitized with nh3 (allowlist-based) before it reaches the
+- Jinja2 runs in a `SandboxedEnvironment`, so there's no attribute traversal to
+  dangerous internals, and autoescape is on.
+- Template HTML goes through nh3 (allowlist-based) before it reaches the
   browser.
-- The browser context intercepts all network requests and blocks everything
-  outside `RenderConfig.allowed_egress_hosts` (default: Google Fonts) — a
-  malicious template can't exfiltrate row data via an `<img>` beacon.
-- Chromium runs with its sandbox left **on** (don't run the engine as root).
-- Author `@page` rules are stripped so template CSS can't override the page
+- The browser context intercepts every network request and blocks anything
+  outside `RenderConfig.allowed_egress_hosts` (Google Fonts by default), so a
+  malicious template can't exfiltrate row data through an `<img>` beacon.
+- Chromium keeps its sandbox **on**, which is why you shouldn't run the engine
+  as root.
+- Author `@page` rules are stripped, so template CSS can't override the page
   geometry you asked for.
 
 ## Configuration
@@ -182,13 +188,13 @@ configure(RenderConfig(
 ))
 ```
 
-Call `configure()` once, before `start_browser()` (or the first render, which
-starts it) — `concurrency` sizes the browser's gate at startup and changes
-after that are ignored.
+Call `configure()` once, and call it before `start_browser()` (or before your
+first render, which starts the browser for you). `concurrency` sizes the gate
+when the browser starts, so changing it after that does nothing.
 
 ## Development
 
-No local Python needed — the test suite runs in containers:
+You don't need a local Python. The test suite runs in containers:
 
 ```sh
 scripts/test.sh            # unit suite (Chromium-dependent tests self-skip)
@@ -201,8 +207,8 @@ scripts/lint.sh            # ruff
 
 [sheetrender.com](https://sheetrender.com) is the hosted product built on this
 engine: a template wizard with AI design generation, Google Sheets sync,
-scheduled runs, and email/Drive delivery. If you'd rather not run Python,
-that's the two-minute path.
+scheduled runs, and email/Drive delivery. If you'd rather not run Python, that's
+the two-minute path.
 
 ## License
 
