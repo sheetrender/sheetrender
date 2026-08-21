@@ -1,12 +1,12 @@
 [project]
 name = "sheetrender"
-version = "0.1.0"
+version = "0.1.1"
 description = "Spreadsheet + HTML template in, a PDF per row out. The batch rendering engine behind sheetrender.com."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11,<3.14"
-authors = [{ name = "SheetRender", email = "info@finaldynamics.com" }]
+authors = [{ name = "SheetRender", email = "contact@sheetrender.com" }]
 keywords = [
   "pdf",
   "html-to-pdf",

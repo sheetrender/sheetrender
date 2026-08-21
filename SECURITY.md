@@ -19,7 +19,7 @@ allowlist bypasses, or a template that can read another render's data.
 
 ## Reporting
 
-Email **info@finaldynamics.com** with a proof-of-concept template/data pair.
+Email **contact@sheetrender.com** with a proof-of-concept template/data pair.
 Please don't open a public issue for suspected vulnerabilities. We'll respond
 within a few days, and credit you in the changelog unless you'd rather not be
 named.

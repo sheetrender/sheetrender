@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
+
+- Contact address is now contact@sheetrender.com (metadata-only release).
+
+## 0.1.0
 
 - Initial extraction of the SheetRender render engine: Chromium PDF rendering
   with browser recycling, sandboxed Jinja templating, CSV/XLSX ingestion, row
