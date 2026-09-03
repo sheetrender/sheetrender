@@ -3,7 +3,16 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 
 from jinja2 import StrictUndefined, Template, TemplateError, select_autoescape
+from jinja2.exceptions import SecurityError
 from jinja2.sandbox import SandboxedEnvironment
+
+# Ceilings for the two operators that can allocate far more than the template
+# text suggests. The rendered-size check runs after the expression has already
+# been evaluated, so `{{ 'x' * 10**9 }}` or `10**10**8` would exhaust memory or
+# CPU before it ever fired. Both limits are generous for any real document.
+MAX_REPEAT_LENGTH = 1_000_000
+MAX_POWER_EXPONENT = 10_000
+MAX_POWER_BASE_BITS = 4_096
 
 
 def money_k(x):
@@ -113,8 +122,47 @@ def yesno_class(v):
     return "" if str(v).strip().lower() in {"yes", "true", "1"} else "no"
 
 
+class BoundedSandboxedEnvironment(SandboxedEnvironment):
+    """SandboxedEnvironment that refuses runaway `*` and `**` at evaluation time."""
+
+    intercepted_binops = frozenset({"*", "**"})
+
+    def call_binop(self, context, operator, left, right):
+        if operator == "*":
+            _check_repeat(left, right)
+        elif operator == "**":
+            _check_power(left, right)
+        return super().call_binop(context, operator, left, right)
+
+
+def _sized_length(value) -> int | None:
+    if isinstance(value, (str, bytes, list, tuple)):
+        return len(value)
+    return None
+
+
+def _check_repeat(left, right) -> None:
+    for seq, count in ((left, right), (right, left)):
+        length = _sized_length(seq)
+        if length is None or isinstance(count, bool) or not isinstance(count, int):
+            continue
+        if count > 0 and length * count > MAX_REPEAT_LENGTH:
+            raise SecurityError(
+                f"repeating a value {count} times would exceed {MAX_REPEAT_LENGTH} characters"
+            )
+
+
+def _check_power(base, exponent) -> None:
+    if isinstance(exponent, bool) or not isinstance(exponent, int):
+        return
+    if abs(exponent) > MAX_POWER_EXPONENT:
+        raise SecurityError(f"exponent {exponent} exceeds {MAX_POWER_EXPONENT}")
+    if isinstance(base, int) and not isinstance(base, bool) and base.bit_length() > MAX_POWER_BASE_BITS:
+        raise SecurityError("power base is too large")
+
+
 def get_env(*, autoescape: bool = True) -> SandboxedEnvironment:
-    env = SandboxedEnvironment(
+    env = BoundedSandboxedEnvironment(
         autoescape=select_autoescape(default=True) if autoescape else False,
         undefined=StrictUndefined,
     )

@@ -153,3 +153,36 @@ def test_syntax_error_raises():
     with pytest.raises(TemplateError) as exc_info:
         validate_and_render("{% for %}", {})
     assert str(exc_info.value).count("Template render error:") == 1
+
+
+class TestRunawayOperators:
+    """`*` and `**` are intercepted before they allocate, not after."""
+
+    def _render(self, source: str) -> str:
+        from sheetrender.templating import get_env
+
+        return get_env().from_string(source).render()
+
+    def test_ordinary_arithmetic_and_repeats_still_work(self):
+        assert self._render("{{ 3 * 4 }} {{ 2 ** 10 }} {{ '-' * 20 }}") == "12 1024 " + "-" * 20
+
+    def test_huge_string_repeat_is_refused(self):
+        from jinja2.exceptions import SecurityError
+
+        with pytest.raises(SecurityError):
+            self._render("{{ 'x' * 10**9 }}")
+        with pytest.raises(SecurityError):
+            self._render("{{ 10**9 * 'x' }}")
+        with pytest.raises(SecurityError):
+            self._render("{{ [1] * 5000000 }}")
+
+    def test_huge_power_is_refused(self):
+        from jinja2.exceptions import SecurityError
+
+        with pytest.raises(SecurityError):
+            self._render("{{ 10 ** 100000 }}")
+        with pytest.raises(SecurityError):
+            self._render("{{ (2 ** 5000) ** 2 }}")
+
+    def test_float_and_negative_exponents_are_not_flagged(self):
+        assert self._render("{{ 2 ** -1 }} {{ 2.0 ** 3 }}") == "0.5 8.0"
