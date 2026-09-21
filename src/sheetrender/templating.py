@@ -1,52 +1,90 @@
 from __future__ import annotations
 
+import math
+import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
+from functools import wraps
 
-from jinja2 import StrictUndefined, Template, TemplateError, select_autoescape
+from jinja2 import (
+    StrictUndefined,
+    Template,
+    TemplateError,
+    TemplateSyntaxError,
+    select_autoescape,
+)
+from jinja2 import filters as _jinja_filters
 from jinja2.exceptions import SecurityError
 from jinja2.sandbox import SandboxedEnvironment
 
-# Ceilings for the two operators that can allocate far more than the template
-# text suggests. The rendered-size check runs after the expression has already
-# been evaluated, so `{{ 'x' * 10**9 }}` or `10**10**8` would exhaust memory or
-# CPU before it ever fired. Both limits are generous for any real document.
+# Ceilings for single expressions that can allocate far more than the template
+# text suggests. Any size check a caller runs on the rendered output comes after
+# the expression has already been evaluated, so `{{ 'x' * 10**9 }}`,
+# `'x'.ljust(10**9)` or `10**10**8` would exhaust memory or CPU before it ever
+# fired. The limits are generous for any real document.
 MAX_REPEAT_LENGTH = 1_000_000
 MAX_POWER_EXPONENT = 10_000
 MAX_POWER_BASE_BITS = 4_096
 
+ERROR_PREFIX = "Template render error:"
 
-def money_k(x):
+# str methods whose only argument is an output width. Templates get the same
+# result from the bounded `center` filter or `format`, so they are refused
+# outright rather than checked.
+_PADDING_METHODS = frozenset({"ljust", "rjust", "center", "zfill", "expandtabs"})
+
+_DIGIT_RUN_RE = re.compile(r"[0-9]+")
+# Captures width and precision: "%-8.3f" gives ("8", "3"). Either may be "*",
+# which takes the number from the arguments instead.
+_PERCENT_SPEC_RE = re.compile(r"%[-+ #0]*([0-9]+|\*)?(?:\.([0-9]+|\*))?")
+_BRACE_FIELD_RE = re.compile(r"\{[^{}]*\}")
+# A replacement field inside a format spec, as in "{:>{width}}".
+_NESTED_FIELD_RE = re.compile(r":[^{}]*\{")
+
+
+def _to_number(x) -> float | None:
+    """float(x) for the formatting filters, or None if x is not a finite number."""
     try:
         v = float(x)
     except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _sign(v: float, digits: int) -> str:
+    # Decided on the rounded value so -0.4 prints as "$0", not "-$0".
+    return "-" if round(v, digits) < 0 else ""
+
+
+def money_k(x):
+    v = _to_number(x)
+    if v is None:
         return ""
-    prefix = "-$" if v < 0 else "$"
+    prefix = f"{_sign(v, 0)}$"
     v = abs(v)
-    if v >= 1_000_000:
-        m = v / 1_000_000
-        s = f"{m:.1f}"
-        if s.endswith(".0"):
-            s = s[:-2]
+    # Thresholds sit half a unit below the round number so a value that rounds
+    # up to it moves to the next suffix: 999,999 is "$1M", not "$1000K".
+    if v >= 999_500:
+        s = f"{v / 1_000_000:.1f}".removesuffix(".0")
         return f"{prefix}{s}M"
-    if v >= 1000:
+    if v >= 999.5:
         return f"{prefix}{round(v / 1000)}K"
     return f"{prefix}{round(v)}"
 
 
 def money(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
+    v = _to_number(x)
+    if v is None:
         return ""
-    return f"{'-$' if v < 0 else '$'}{abs(v):,.0f}"
+    return f"{_sign(v, 0)}${abs(v):,.0f}"
 
 
 def money2(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
+    v = _to_number(x)
+    if v is None:
         return ""
-    return f"{'-$' if v < 0 else '$'}{abs(v):,.2f}"
+    return f"{_sign(v, 2)}${abs(v):,.2f}"
 
 
 def sumcol(items, key):
@@ -76,35 +114,31 @@ def sumcol(items, key):
 
 
 def comma(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
+    v = _to_number(x)
+    if v is None:
         return ""
-    return f"{v:,.0f}"
+    return f"{_sign(v, 0)}{abs(v):,.0f}"
 
 
 def comma2(x):
     # money2 without the "$": the amount half of a non-USD price, so the
     # template supplies its own currency symbol next to it.
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
+    v = _to_number(x)
+    if v is None:
         return ""
-    return f"{v:,.2f}"
+    return f"{_sign(v, 2)}{abs(v):,.2f}"
 
 
 def pct(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
+    v = _to_number(x)
+    if v is None:
         return ""
     return f"{round(v)}%"
 
 
 def bar_width(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
+    v = _to_number(x)
+    if v is None:
         return 0.0
     return max(0.0, min(100.0, v))
 
@@ -123,16 +157,49 @@ def yesno_class(v):
 
 
 class BoundedSandboxedEnvironment(SandboxedEnvironment):
-    """SandboxedEnvironment that refuses runaway `*` and `**` at evaluation time."""
+    """SandboxedEnvironment that refuses runaway allocations at evaluation time.
 
-    intercepted_binops = frozenset({"*", "**"})
+    Covers the single expressions that turn a short template into a huge value:
+    `*`, `**`, `+`, `%`-formatting, `str.format` widths and the padding methods.
+    Growth spread over a loop (`~` concatenation, `join`) is not bounded here;
+    callers rendering hostile templates still need a process memory limit.
+    """
+
+    intercepted_binops = frozenset({"*", "**", "+", "%"})
 
     def call_binop(self, context, operator, left, right):
         if operator == "*":
             _check_repeat(left, right)
         elif operator == "**":
             _check_power(left, right)
+        elif operator == "+":
+            _check_concat(left, right)
+        elif operator == "%":
+            _check_percent_format(left, right)
         return super().call_binop(context, operator, left, right)
+
+    def is_safe_attribute(self, obj, attr, value):
+        if isinstance(obj, str) and attr in _PADDING_METHODS:
+            return False
+        return super().is_safe_attribute(obj, attr, value)
+
+    # Jinja sandboxes str.format through one of two hooks depending on its
+    # version: format_string up to 3.1.4, wrap_str_format from 3.1.5.
+    def format_string(self, s, args, kwargs, format_func=None):
+        _check_brace_format(s, _format_values(args, kwargs))
+        return super().format_string(s, args, kwargs, format_func)
+
+    def wrap_str_format(self, value):
+        sandboxed = super().wrap_str_format(value)
+        if sandboxed is None:
+            return None
+
+        @wraps(sandboxed)
+        def bounded(*args, **kwargs):
+            _check_brace_format(value.__self__, _format_values(args, kwargs))
+            return sandboxed(*args, **kwargs)
+
+        return bounded
 
 
 def _sized_length(value) -> int | None:
@@ -141,10 +208,14 @@ def _sized_length(value) -> int | None:
     return None
 
 
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _check_repeat(left, right) -> None:
     for seq, count in ((left, right), (right, left)):
         length = _sized_length(seq)
-        if length is None or isinstance(count, bool) or not isinstance(count, int):
+        if length is None or not _is_int(count):
             continue
         if count > 0 and length * count > MAX_REPEAT_LENGTH:
             raise SecurityError(
@@ -153,12 +224,82 @@ def _check_repeat(left, right) -> None:
 
 
 def _check_power(base, exponent) -> None:
-    if isinstance(exponent, bool) or not isinstance(exponent, int):
+    if not _is_int(exponent):
         return
     if abs(exponent) > MAX_POWER_EXPONENT:
         raise SecurityError(f"exponent {exponent} exceeds {MAX_POWER_EXPONENT}")
-    if isinstance(base, int) and not isinstance(base, bool) and base.bit_length() > MAX_POWER_BASE_BITS:
+    if _is_int(base) and base.bit_length() > MAX_POWER_BASE_BITS:
         raise SecurityError("power base is too large")
+
+
+def _check_concat(left, right) -> None:
+    left_length = _sized_length(left)
+    right_length = _sized_length(right)
+    if left_length is None or right_length is None:
+        return
+    if left_length + right_length > MAX_REPEAT_LENGTH:
+        raise SecurityError(f"joining these values would exceed {MAX_REPEAT_LENGTH} characters")
+
+
+def _check_widths(literal_widths, values, *, values_are_widths: bool) -> None:
+    """Refuse a format whose width or precision could exceed the ceiling.
+
+    A width is either a literal number inside a format spec or, when the spec
+    asks for it (`%*d`, `{:>{width}}`), an integer argument.
+    """
+    widths = [int(width) for width in literal_widths]
+    if values_are_widths:
+        widths += [abs(value) for value in values if _is_int(value)]
+    if any(width > MAX_REPEAT_LENGTH for width in widths):
+        raise SecurityError(f"format width exceeds {MAX_REPEAT_LENGTH} characters")
+
+
+def _check_percent_format(format_string, values) -> None:
+    if not isinstance(format_string, str):
+        return
+    specs = _PERCENT_SPEC_RE.findall(format_string)
+    literal_widths = [part for spec in specs for part in spec if part.isdigit()]
+    if isinstance(values, dict):
+        values = tuple(values.values())
+    elif not isinstance(values, tuple):
+        values = (values,)
+    _check_widths(literal_widths, values, values_are_widths="*" in format_string)
+
+
+def _format_values(args, kwargs) -> list:
+    """Every value passed to format() or format_map(), mappings flattened."""
+    values = list(kwargs.values())
+    for arg in args:
+        values.extend(arg.values() if isinstance(arg, Mapping) else (arg,))
+    return values
+
+
+def _check_brace_format(format_string, values) -> None:
+    if not isinstance(format_string, str):
+        return
+    fields = _BRACE_FIELD_RE.findall(format_string)
+    literal_widths = [run for field in fields for run in _DIGIT_RUN_RE.findall(field)]
+    nested = _NESTED_FIELD_RE.search(format_string) is not None
+    _check_widths(literal_widths, values, values_are_widths=nested)
+
+
+def _bounded_center(value, width=80):
+    _check_widths([], (width,), values_are_widths=True)
+    return _jinja_filters.do_center(value, width)
+
+
+def _bounded_indent(s, width=4, first=False, blank=False):
+    # indent adds `width` to every line, so the growth is lines x width.
+    lines = str(s).count("\n") + 1
+    added = (width if _is_int(width) else len(str(width))) * lines
+    if added > MAX_REPEAT_LENGTH:
+        raise SecurityError(f"indenting would add more than {MAX_REPEAT_LENGTH} characters")
+    return _jinja_filters.do_indent(s, width, first, blank)
+
+
+def _bounded_format(value, *args, **kwargs):
+    _check_percent_format(str(value), kwargs or args)
+    return _jinja_filters.do_format(value, *args, **kwargs)
 
 
 def get_env(*, autoescape: bool = True) -> SandboxedEnvironment:
@@ -178,65 +319,60 @@ def get_env(*, autoescape: bool = True) -> SandboxedEnvironment:
             "bar_width": bar_width,
             "sign_class": sign_class,
             "yesno_class": yesno_class,
+            "center": _bounded_center,
+            "indent": _bounded_indent,
+            "format": _bounded_format,
         }
     )
     return env
-
-
-def compile_template(html: str) -> Template:
-    """Compile a template once so batch jobs don't re-parse it per row."""
-    try:
-        return get_env().from_string(html)
-    except TemplateError as exc:
-        raise type(exc)(f"Template render error: {exc}") from exc
 
 
 class TemplateRenderError(TemplateError):
     """A non-syntax failure raised while evaluating a template."""
 
 
-def _wrapped_render_error(exc: Exception) -> TemplateError:
-    # validate_and_render deliberately guards both compilation and rendering,
-    # while render_compiled also has to be safe when batch jobs call it
-    # directly. Keep the nested guard from adding the same prefix twice.
-    if isinstance(exc, TemplateRenderError) or (
-        isinstance(exc, TemplateError) and str(exc).startswith("Template render error:")
-    ):
-        return exc
-    return TemplateRenderError(f"Template render error: {exc}")
+@contextmanager
+def _prefixed_errors() -> Iterator[None]:
+    """Re-raise any failure as a TemplateError whose message starts with ERROR_PREFIX.
+
+    The guards nest (validate_and_render wraps render_compiled, which batch jobs
+    also call directly), so an error that already carries the prefix passes
+    through untouched instead of gaining a second one.
+    """
+    try:
+        yield
+    except Exception as exc:
+        if isinstance(exc, TemplateError) and str(exc).startswith(ERROR_PREFIX):
+            raise
+        if isinstance(exc, TemplateSyntaxError):
+            # Same type, so callers can still read .lineno; str() appends the line.
+            raise TemplateSyntaxError(
+                f"{ERROR_PREFIX} {exc.message}", exc.lineno, exc.name, exc.filename
+            ) from exc
+        raise TemplateRenderError(f"{ERROR_PREFIX} {exc}") from exc
+
+
+def compile_template(html: str) -> Template:
+    """Compile a template once so batch jobs don't re-parse it per row."""
+    with _prefixed_errors():
+        return get_env().from_string(html)
 
 
 def render_compiled(template: Template, row: dict) -> str:
-    try:
+    with _prefixed_errors():
         return template.render(**row)
-    except Exception as exc:
-        wrapped = _wrapped_render_error(exc)
-        if wrapped is exc:
-            raise
-        raise wrapped from exc
 
 
 def validate_and_render(html: str, row: dict) -> str:
-    try:
-        return render_compiled(compile_template(html), row)
-    except Exception as exc:
-        wrapped = _wrapped_render_error(exc)
-        if wrapped is exc:
-            raise
-        raise wrapped from exc
+    return render_compiled(compile_template(html), row)
 
 
-def render_row(html: str, row: dict) -> str:
-    return validate_and_render(html, row)
+# Older name for validate_and_render, kept for existing callers.
+render_row = validate_and_render
 
 
 def render_text(template_str: str, row: dict) -> str:
     """Render a plain-text template (filename patterns and other non-HTML
     strings) without autoescaping — entity-escaped output would corrupt them."""
-    try:
+    with _prefixed_errors():
         return get_env(autoescape=False).from_string(template_str).render(**row)
-    except Exception as exc:
-        wrapped = _wrapped_render_error(exc)
-        if wrapped is exc:
-            raise
-        raise wrapped from exc

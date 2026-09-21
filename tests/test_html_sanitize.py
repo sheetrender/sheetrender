@@ -1,5 +1,5 @@
+from sheetrender.browser import _egress_guard
 from sheetrender.html_sanitize import ALLOWED_EGRESS_HOSTS, sanitize_render_html
-from sheetrender.render import _egress_guard
 
 
 class TestSanitizeRenderHtml:

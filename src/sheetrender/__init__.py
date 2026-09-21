@@ -7,6 +7,7 @@ try:
 except PackageNotFoundError:  # running from a source tree without install
     __version__ = "0.0.0"
 
+from .column_keys import sanitize_columns
 from .config import DEFAULT_EGRESS_HOSTS, RenderConfig, configure, get_config
 from .filenames import dedupe_filenames, render_filename
 from .grouping import (
@@ -25,6 +26,7 @@ from .render import (
     BatchRenderer,
     PriorityGate,
     apply_pdf_metadata,
+    browser_is_connected,
     inject_preview_watermark,
     inject_watermark,
     merge_pdfs,
@@ -39,7 +41,6 @@ from .render import (
     strip_author_page_rules,
     zip_files,
 )
-from .sanitize import sanitize_columns
 from .sheets import DEFAULT_MAX_CELLS, iter_rows, parse_csv, parse_xlsx
 from .templating import (
     TemplateRenderError,
@@ -59,6 +60,7 @@ __all__ = [
     "get_config",
     "start_browser",
     "stop_browser",
+    "browser_is_connected",
     "render_pdf",
     "render_context",
     "BatchRenderer",

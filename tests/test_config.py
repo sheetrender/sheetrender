@@ -148,6 +148,7 @@ async def test_configured_allowlist_reaches_the_sanitizer_through_render_pdf():
     proof: with the host allowed the tag survives, and with the default config
     the same markup loses it.
     """
+    from sheetrender import browser
     from sheetrender import render as render_service
 
     html = (
@@ -164,10 +165,10 @@ async def test_configured_allowlist_reaches_the_sanitizer_through_render_pdf():
         mock_browser = MagicMock(new_context=AsyncMock(return_value=mock_context))
 
         with (
-            patch.object(render_service, "_browser", mock_browser),
-            patch.object(render_service, "_gate", _MockGate()),
-            patch.object(render_service, "_render_count", 0),
-            patch.object(render_service, "_browser_launch_time", None),
+            patch.object(browser._state, "browser", mock_browser),
+            patch.object(browser._state, "gate", _MockGate()),
+            patch.object(browser._state, "render_count", 0),
+            patch.object(browser._state, "launch_time", None),
         ):
             await render_service.render_pdf(html)
         return mock_page.set_content.call_args[0][0]
@@ -190,7 +191,7 @@ async def test_configured_allowlist_reaches_the_egress_guard():
     CSS url()/@import fetches never pass through nh3, so the two allowlists
     have to be the same allowlist.
     """
-    from sheetrender.render import _egress_guard
+    from sheetrender.browser import _egress_guard
 
     allowed = _FakeRoute(f"https://{CUSTOM_HOST}/logo.png")
     await _egress_guard(allowed)

@@ -1,6 +1,7 @@
 import asyncio
 import io
 import zipfile
+from contextlib import ExitStack, contextmanager
 from contextlib import asynccontextmanager as _acm
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +11,26 @@ import pytest
 class _MockGate:
     @_acm
     async def slot(self, high=False):
+        yield
+
+
+@contextmanager
+def _started_browser(mock_browser, *, gate=None):
+    """Point the shared browser state at mocks, the way start_browser would.
+
+    The Chromium globals live on sheetrender.browser._state now, so the render
+    path reads the fields rather than module-level names.
+    """
+    from sheetrender import browser
+
+    with ExitStack() as stack:
+        for field, value in (
+            ("browser", mock_browser),
+            ("gate", _MockGate() if gate is None else gate),
+            ("render_count", 0),
+            ("launch_time", None),
+        ):
+            stack.enter_context(patch.object(browser._state, field, value))
         yield
 
 
@@ -168,12 +189,7 @@ async def test_render_pdf_default_settings():
     mock_context.new_page = AsyncMock(return_value=mock_page)
     mock_page.pdf = AsyncMock(return_value=b"%PDF-fake")
 
-    with (
-        patch.object(render_service, "_browser", mock_browser),
-        patch.object(render_service, "_gate", mock_gate),
-        patch.object(render_service, "_render_count", 0),
-        patch.object(render_service, "_browser_launch_time", None),
-    ):
+    with _started_browser(mock_browser, gate=mock_gate):
         result = await render_service.render_pdf("<html/>")
 
     assert result == b"%PDF-fake"
@@ -202,12 +218,7 @@ async def test_render_pdf_landscape_letter():
         "orientation": "landscape",
         "margins": {"top": 8, "right": 8, "bottom": 8, "left": 8},
     }
-    with (
-        patch.object(render_service, "_browser", mock_browser),
-        patch.object(render_service, "_gate", mock_gate),
-        patch.object(render_service, "_render_count", 0),
-        patch.object(render_service, "_browser_launch_time", None),
-    ):
+    with _started_browser(mock_browser, gate=mock_gate):
         result = await render_service.render_pdf("<html/>", settings)
 
     assert result == b"%PDF-fake"
@@ -231,12 +242,7 @@ async def test_render_pdf_page_numbers_on():
     mock_page.pdf = AsyncMock(return_value=b"%PDF-fake")
 
     settings = {"page_numbers": True}
-    with (
-        patch.object(render_service, "_browser", mock_browser),
-        patch.object(render_service, "_gate", mock_gate),
-        patch.object(render_service, "_render_count", 0),
-        patch.object(render_service, "_browser_launch_time", None),
-    ):
+    with _started_browser(mock_browser, gate=mock_gate):
         result = await render_service.render_pdf("<html/>", settings)
 
     assert result == b"%PDF-fake"
@@ -261,12 +267,7 @@ async def test_render_pdf_page_numbers_off():
     mock_page.pdf = AsyncMock(return_value=b"%PDF-fake")
 
     settings = {}
-    with (
-        patch.object(render_service, "_browser", mock_browser),
-        patch.object(render_service, "_gate", mock_gate),
-        patch.object(render_service, "_render_count", 0),
-        patch.object(render_service, "_browser_launch_time", None),
-    ):
+    with _started_browser(mock_browser, gate=mock_gate):
         result = await render_service.render_pdf("<html/>", settings)
 
     assert result == b"%PDF-fake"
@@ -389,13 +390,13 @@ def test_merge_pdfs_preserves_highest_source_version(tmp_path):
 def test_merge_pdfs_falls_back_when_optimization_fails(tmp_path, caplog):
     import pikepdf
 
-    from sheetrender import render as render_service
+    from sheetrender import pdf_post
 
     source = tmp_path / "source.pdf"
     _write_pdf_with_image(source, b"image")
 
-    with patch.object(render_service, "_pdf_version_key", side_effect=ValueError("bad version")):
-        result = render_service.merge_pdfs([str(source)])
+    with patch.object(pdf_post, "_pdf_version_key", side_effect=ValueError("bad version")):
+        result = pdf_post.merge_pdfs([str(source)])
 
     with pikepdf.open(io.BytesIO(result)) as merged:
         assert len(merged.pages) == 1
@@ -570,7 +571,7 @@ def test_the_width_table_covers_every_letter_the_stamp_draws():
     was: built for "Page X of Y", it held P but not R/E/V/I/W, so "PREVIEW"
     measured 13% narrow and the stamp sized and centred itself against that.
     """
-    from sheetrender.render import _HELVETICA_WIDTHS
+    from sheetrender.pdf_post import _HELVETICA_WIDTHS
 
     missing = sorted(set("PREVIEW") - set(_HELVETICA_WIDTHS))
     assert missing == [], f"stamp draws glyphs the width table lacks: {missing}"
@@ -706,10 +707,7 @@ async def test_render_pdf_stamps_the_preview_mark_after_rendering(preview):
     stamper = MagicMock(return_value=b"%PDF-stamped")
 
     with (
-        patch.object(render_service, "_browser", mock_browser),
-        patch.object(render_service, "_gate", _MockGate()),
-        patch.object(render_service, "_render_count", 0),
-        patch.object(render_service, "_browser_launch_time", None),
+        _started_browser(mock_browser),
         patch.object(render_service, "stamp_preview_watermark", stamper),
     ):
         result = await render_service.render_pdf(
@@ -736,10 +734,7 @@ async def test_a_batch_render_is_never_stamped():
     stamper = MagicMock(return_value=b"%PDF-stamped")
 
     with (
-        patch.object(render_service, "_browser", mock_browser),
-        patch.object(render_service, "_gate", _MockGate()),
-        patch.object(render_service, "_render_count", 0),
-        patch.object(render_service, "_browser_launch_time", None),
+        _started_browser(mock_browser),
         patch.object(render_service, "stamp_preview_watermark", stamper),
     ):
         renderer = render_service.BatchRenderer()
@@ -766,12 +761,7 @@ async def test_watermark_html_is_injected_only_when_supplied(renderer):
     mock_browser = MagicMock(new_context=AsyncMock(return_value=mock_context))
 
     async def _render(**kwargs):
-        with (
-            patch.object(render_service, "_browser", mock_browser),
-            patch.object(render_service, "_gate", _MockGate()),
-            patch.object(render_service, "_render_count", 0),
-            patch.object(render_service, "_browser_launch_time", None),
-        ):
+        with _started_browser(mock_browser):
             if renderer == "module":
                 await render_service.render_pdf("<html><body><p>Hi</p></body></html>", **kwargs)
             else:
@@ -969,7 +959,7 @@ async def test_priority_gate_drain_excludes_new_acquires():
 def test_should_recycle_check_by_count():
     import time
 
-    from sheetrender.render import _should_recycle_check
+    from sheetrender.browser import _should_recycle_check
 
     now = time.monotonic()
     assert _should_recycle_check(300, now, 300, 30) is True
@@ -979,7 +969,7 @@ def test_should_recycle_check_by_count():
 def test_should_recycle_check_by_age():
     import time
 
-    from sheetrender.render import _should_recycle_check
+    from sheetrender.browser import _should_recycle_check
 
     old_time = time.monotonic() - 31 * 60
     assert _should_recycle_check(0, old_time, 300, 30) is True
@@ -988,6 +978,6 @@ def test_should_recycle_check_by_age():
 
 
 def test_should_recycle_check_no_launch_time():
-    from sheetrender.render import _should_recycle_check
+    from sheetrender.browser import _should_recycle_check
 
     assert _should_recycle_check(0, None, 300, 30) is False

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import sys
 import traceback
@@ -16,6 +17,7 @@ from sheetrender import (
     configure,
     dedupe_filenames,
     detect_group_candidates,
+    get_config,
     group_context,
     grouped_render_units,
     iter_rows,
@@ -26,6 +28,7 @@ from sheetrender import (
     render_context,
     render_filename,
     render_pdf,
+    render_text,
     render_thumbnail,
     start_browser,
     stop_browser,
@@ -313,12 +316,29 @@ def _batch_contexts(
     return list(enumerate(rows)), False
 
 
+def _check_filename_template(
+    filename_template: str, units: list[tuple[int, dict[str, Any]]]
+) -> None:
+    # render_filename falls back to row_N.pdf on any template error, which suits
+    # a long-running service but would hide a typo like {{ custmer }} here.
+    # Rendering the first document's name up front reports it instead.
+    if not units:
+        return
+    try:
+        render_text(filename_template, units[0][1])
+    except Exception as exc:
+        raise CliError(f"Invalid --filename template: {exc}") from exc
+
+
 def _batch_filenames(
     units: list[tuple[int, dict[str, Any]]],
     filename_template: str | None,
     grouped: bool,
 ) -> list[str]:
     if filename_template:
+        _check_filename_template(filename_template, units)
+    if filename_template or grouped:
+        # With no template, a grouped document is named after its group key.
         names = [
             render_filename(filename_template, context, index, grouped=grouped)
             for index, context in units
@@ -328,19 +348,19 @@ def _batch_filenames(
     return dedupe_filenames(names)
 
 
-async def _batch_command(args: argparse.Namespace) -> int:
-    source = _read_text(args.template, "template")
-    template = compile_template(source)
-    dataset = _parse_dataset(args.data)
-    units, grouped = _batch_contexts(args, dataset)
-    filenames = _batch_filenames(units, args.filename, grouped)
-    output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    concurrency = args.concurrency or RenderConfig().concurrency
+async def _render_batch(
+    args: argparse.Namespace,
+    template: Any,
+    units: list[tuple[int, dict[str, Any]]],
+    filenames: list[str],
+    output_dir: Path,
+) -> list[Path]:
+    """Render every unit to output_dir and return the paths in unit order."""
     if args.concurrency is not None:
-        configure(RenderConfig(concurrency=args.concurrency))
-    semaphore = asyncio.Semaphore(concurrency)
+        configure(dataclasses.replace(get_config(), concurrency=args.concurrency))
+    # Bounds how many rows hold rendered HTML in memory at once; the browser
+    # side enforces the same number through its own gate.
+    semaphore = asyncio.Semaphore(get_config().concurrency)
     rendered_paths: list[Path | None] = [None] * len(units)
     page_settings = _page_settings(args)
 
@@ -373,27 +393,44 @@ async def _batch_command(args: argparse.Namespace) -> int:
     finally:
         await stop_browser()
 
-    paths = [path for path in rendered_paths if path is not None]
-    path_strings = [str(path) for path in paths]
+    return [path for path in rendered_paths if path is not None]
+
+
+async def _write_merged(paths: list[Path], merged_path: Path, *, page_numbers: bool) -> None:
+    merged_path.parent.mkdir(parents=True, exist_ok=True)
+    merged = await asyncio.to_thread(
+        merge_pdfs,
+        [str(path) for path in paths],
+        page_numbers=page_numbers,
+    )
+    await asyncio.to_thread(merged_path.write_bytes, merged)
+    print(f"Merged {len(paths)} documents into {merged_path}")
+
+
+async def _write_zip(paths: list[Path], zip_path: Path) -> None:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    archive = await asyncio.to_thread(
+        zip_files,
+        [(str(path), path.name) for path in paths],
+    )
+    await asyncio.to_thread(zip_path.write_bytes, archive)
+    print(f"Archived {len(paths)} documents in {zip_path}")
+
+
+async def _batch_command(args: argparse.Namespace) -> int:
+    source = _read_text(args.template, "template")
+    template = compile_template(source)
+    dataset = _parse_dataset(args.data)
+    units, grouped = _batch_contexts(args, dataset)
+    filenames = _batch_filenames(units, args.filename, grouped)
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = await _render_batch(args, template, units, filenames, output_dir)
     if args.merge:
-        merged_path = Path(args.merge)
-        merged_path.parent.mkdir(parents=True, exist_ok=True)
-        merged = await asyncio.to_thread(
-            merge_pdfs,
-            path_strings,
-            page_numbers=args.page_numbers,
-        )
-        await asyncio.to_thread(merged_path.write_bytes, merged)
-        print(f"Merged {len(paths)} documents into {merged_path}")
+        await _write_merged(paths, Path(args.merge), page_numbers=args.page_numbers)
     if args.zip_path:
-        zip_path = Path(args.zip_path)
-        zip_path.parent.mkdir(parents=True, exist_ok=True)
-        archive = await asyncio.to_thread(
-            zip_files,
-            [(str(path), path.name) for path in paths],
-        )
-        await asyncio.to_thread(zip_path.write_bytes, archive)
-        print(f"Archived {len(paths)} documents in {zip_path}")
+        await _write_zip(paths, Path(args.zip_path))
 
     print(f"Done: {len(paths)} documents in {output_dir}")
     return 0
@@ -419,8 +456,8 @@ async def _thumbnail_command(args: argparse.Namespace) -> int:
 
 def _print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
     widths = [
-        max(len(headers[index]), *(len(row[index]) for row in rows))
-        for index in range(len(headers))
+        max([len(header), *(len(row[index]) for row in rows)])
+        for index, header in enumerate(headers)
     ]
     print(
         "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers))
@@ -510,6 +547,8 @@ def _first_leaf(exc: BaseException) -> BaseException:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command == "batch" and args.page_numbers and not args.merge:
+        parser.error("--page-numbers only applies to the merged PDF; add --merge FILE")
     try:
         return asyncio.run(_main_async(args))
     except KeyboardInterrupt:

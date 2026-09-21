@@ -7,10 +7,18 @@ from typing import Iterable
 
 from sheetrender.sheets import iter_rows
 
+# Names group_context adds to a grouped template's variables. A column whose
+# key is one of these is hidden by the group value of the same name.
 RESERVED_CONTEXT_KEYS = {"items", "item_count", "group_key"}
 
+# Column keys that usually identify a document. Long words match anywhere, so
+# "orderid" and "invoiceno" count. The short ones must be a whole snake_case
+# word, because as substrings they also match "postcode", "preferred", "paid"
+# and "valid".
 _GROUP_NAME_HINT = re.compile(
-    r"invoice|order|po|quote|statement|receipt|bill|customer|client|account|ref|number|no$|id$",
+    r"invoice|order|quote|statement|receipt|customer|client|account|number"
+    r"|(?:^|_)(?:po|ref|bill)(?:_|$)"
+    r"|(?:^|_)(?:no|id)$",
     re.IGNORECASE,
 )
 
@@ -41,12 +49,15 @@ class ScanResult:
     doc_columns: list[str]
     item_columns: list[str]
     sample_group: dict | None
-    largest_group_size: int
+    largest_group_size: int  # always equal to max_group_size; kept for existing callers
 
 
 def _normalize_key_value(value) -> str:
     if value is None:
         return ""
+    if isinstance(value, float) and value.is_integer():
+        # 1001 and 1001.0 are the same invoice number; spreadsheets mix the two.
+        value = int(value)
     return str(value).strip()
 
 
@@ -194,6 +205,11 @@ def detect_group_candidates(
     columns: list[dict],
     row_count: int,
 ) -> dict:
+    """Rank columns as grouping candidates and recommend one, if any qualifies.
+
+    `row_count` is only echoed back in the result. The statistics use the rows
+    actually read from the file.
+    """
     counters = {column["key"]: Counter() for column in columns}
     blank_counts = {column["key"]: 0 for column in columns}
 

@@ -11,9 +11,12 @@ from urllib.parse import urlparse
 
 import nh3
 
+from sheetrender.config import DEFAULT_EGRESS_HOSTS
+
 # The default egress allowlist permits Google Fonts because templates commonly
-# use them; nothing else is allowed by default.
-ALLOWED_EGRESS_HOSTS = frozenset({"fonts.googleapis.com", "fonts.gstatic.com"})
+# use them; nothing else is allowed by default. Same object as
+# config.DEFAULT_EGRESS_HOSTS, under the name this module has always exported.
+ALLOWED_EGRESS_HOSTS = DEFAULT_EGRESS_HOSTS
 
 _ALLOWED_TAGS = {
     # document shell
