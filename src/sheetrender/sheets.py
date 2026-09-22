@@ -125,12 +125,12 @@ def _summarize(
                 if parse_date(value, excel_serial=False) is not None:
                     if index in watched:
                         continue
-                    if date_needs_confirmation(value):
-                        if index not in candidates:
-                            candidates.add(index)
-                            continue
+                    if index in candidates:
                         inferred_types[index] = "date"
                         watched.add(index)
+                        continue
+                    if date_needs_confirmation(value):
+                        candidates.add(index)
                         continue
                     inferred_types[index] = "date"
                 elif index in watched:

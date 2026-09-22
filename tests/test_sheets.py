@@ -122,6 +122,10 @@ def test_ambiguous_date_column_with_a_later_version_string_stays_string(tmp_path
     path.write_text("Version,Due\n1.2.2024,1.2.2024\n10.11.2023,10.11.2023\n2.0.1,\n")
     by_key = {column["key"]: column["inferred_type"] for column in parse_csv(str(path))["columns"]}
     assert by_key == {"version": "string", "due": "date"}
+    # Confirmation by an unambiguous date still leaves the column under watch.
+    path.write_text("Value,Due\n1.2.2024,1.2.2024\n2024-03-02,2024-03-02\nversion,\n")
+    by_key = {column["key"]: column["inferred_type"] for column in parse_csv(str(path))["columns"]}
+    assert by_key == {"value": "string", "due": "date"}
 
 
 def test_date_detection_stops_at_5000_rows(tmp_path):
