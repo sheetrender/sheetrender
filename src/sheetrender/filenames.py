@@ -37,6 +37,7 @@ def render_filename(
     row_index: int,
     *,
     grouped: bool = False,
+    day_first: bool = False,
 ) -> str:
     fallback = f"group_{row_index + 1}.pdf" if grouped else _fallback(row_index)
     if grouped and row.get("group_key") is not None:
@@ -46,7 +47,7 @@ def render_filename(
     if not template_str:
         return fallback
     try:
-        rendered = render_text(template_str, row)
+        rendered = render_text(template_str, row, day_first=day_first)
     except Exception:
         return fallback
     if not rendered.strip():

@@ -96,6 +96,14 @@ def _add_page_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_day_first(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--day-first",
+        action="store_true",
+        help="read ambiguous numeric dates such as 03/04/2026 as day/month",
+    )
+
+
 def _add_hidden_debug(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--debug",
@@ -133,6 +141,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="add or override a string context value; may be repeated",
     )
     _add_page_arguments(render_parser)
+    _add_day_first(render_parser)
     _add_hidden_debug(render_parser)
 
     batch_parser = subparsers.add_parser(
@@ -178,6 +187,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"maximum concurrent renders (default: {RenderConfig().concurrency})",
     )
     _add_page_arguments(batch_parser)
+    _add_day_first(batch_parser)
     _add_hidden_debug(batch_parser)
 
     thumbnail_parser = subparsers.add_parser(
@@ -191,6 +201,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     thumbnail_parser.add_argument("--data", metavar="FILE", help="JSON object file")
     _add_page_arguments(thumbnail_parser)
+    _add_day_first(thumbnail_parser)
     _add_hidden_debug(thumbnail_parser)
 
     inspect_parser = subparsers.add_parser(
@@ -258,7 +269,9 @@ async def _render_command(args: argparse.Namespace) -> int:
     source = _read_text(args.template, "template")
     context = _read_json_object(args.data)
     context.update(args.values)
-    html = render_compiled(compile_template(source), context)
+    html = render_compiled(
+        compile_template(source, day_first=args.day_first), context
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -317,7 +330,10 @@ def _batch_contexts(
 
 
 def _check_filename_template(
-    filename_template: str, units: list[tuple[int, dict[str, Any]]]
+    filename_template: str,
+    units: list[tuple[int, dict[str, Any]]],
+    *,
+    day_first: bool = False,
 ) -> None:
     # render_filename falls back to row_N.pdf on any template error, which suits
     # a long-running service but would hide a typo like {{ custmer }} here.
@@ -325,7 +341,7 @@ def _check_filename_template(
     if not units:
         return
     try:
-        render_text(filename_template, units[0][1])
+        render_text(filename_template, units[0][1], day_first=day_first)
     except Exception as exc:
         raise CliError(f"Invalid --filename template: {exc}") from exc
 
@@ -334,13 +350,17 @@ def _batch_filenames(
     units: list[tuple[int, dict[str, Any]]],
     filename_template: str | None,
     grouped: bool,
+    *,
+    day_first: bool = False,
 ) -> list[str]:
     if filename_template:
-        _check_filename_template(filename_template, units)
+        _check_filename_template(filename_template, units, day_first=day_first)
     if filename_template or grouped:
         # With no template, a grouped document is named after its group key.
         names = [
-            render_filename(filename_template, context, index, grouped=grouped)
+            render_filename(
+                filename_template, context, index, grouped=grouped, day_first=day_first
+            )
             for index, context in units
         ]
     else:
@@ -419,10 +439,12 @@ async def _write_zip(paths: list[Path], zip_path: Path) -> None:
 
 async def _batch_command(args: argparse.Namespace) -> int:
     source = _read_text(args.template, "template")
-    template = compile_template(source)
+    template = compile_template(source, day_first=args.day_first)
     dataset = _parse_dataset(args.data)
     units, grouped = _batch_contexts(args, dataset)
-    filenames = _batch_filenames(units, args.filename, grouped)
+    filenames = _batch_filenames(
+        units, args.filename, grouped, day_first=args.day_first
+    )
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -439,7 +461,9 @@ async def _batch_command(args: argparse.Namespace) -> int:
 async def _thumbnail_command(args: argparse.Namespace) -> int:
     source = _read_text(args.template, "template")
     context = _read_json_object(args.data)
-    html = render_compiled(compile_template(source), context)
+    html = render_compiled(
+        compile_template(source, day_first=args.day_first), context
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
 

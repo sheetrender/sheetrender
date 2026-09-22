@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import date as Date
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from functools import wraps
+from functools import partial, wraps
 
 import segno
 from jinja2 import (
@@ -99,8 +99,11 @@ def money2(x, currency="USD"):
     return f"{_sign(v, digits)}{_currency_prefix(currency)}{abs(v):,.{digits}f}"
 
 
-def parse_date(value, *, excel_serial: bool = True) -> Date | None:
+def parse_date(value, *, excel_serial: bool = True, day_first: bool = False) -> Date | None:
     """Parse dates without locale guessing; ambiguous numeric dates are month-first.
+
+    day_first=True reads them day-first instead (03/04/2026 is 3 April). Values
+    only one order can parse, such as 13/04/2026, parse the same either way.
 
     Excel's 1900 system is supported from serial 1 through 73415 (2100-12-31).
     Serial 60 shares 1900-02-28 with 59, matching Excel readers' leap-day fix.
@@ -127,8 +130,11 @@ def parse_date(value, *, excel_serial: bool = True) -> Date | None:
         return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
     except ValueError:
         pass
+    orders = ("%m{sep}%d{sep}%Y", "%d{sep}%m{sep}%Y")
+    if day_first:
+        orders = orders[::-1]
     for separator in ("/", ".", "-"):
-        for order in ("%m{sep}%d{sep}%Y", "%d{sep}%m{sep}%Y"):
+        for order in orders:
             try:
                 parsed = datetime.strptime(value, order.format(sep=separator))
                 return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
@@ -148,10 +154,10 @@ def date_needs_confirmation(value) -> bool:
     )
 
 
-def date(value, fmt="%b %-d, %Y") -> str:
+def date(value, fmt="%b %-d, %Y", *, day_first: bool = False) -> str:
     """Format a date, returning empty text for blank or unparseable input."""
     try:
-        parsed = parse_date(value)
+        parsed = parse_date(value, day_first=day_first)
         # strftime widths allocate before the sandbox can check the result.
         if parsed is None or not isinstance(fmt, str) or len(fmt) > 128:
             return ""
@@ -397,7 +403,7 @@ def _bounded_format(value, *args, **kwargs):
     return _jinja_filters.do_format(value, *args, **kwargs)
 
 
-def get_env(*, autoescape: bool = True) -> SandboxedEnvironment:
+def get_env(*, autoescape: bool = True, day_first: bool = False) -> SandboxedEnvironment:
     env = BoundedSandboxedEnvironment(
         autoescape=select_autoescape(default=True) if autoescape else False,
         undefined=StrictUndefined,
@@ -407,7 +413,8 @@ def get_env(*, autoescape: bool = True) -> SandboxedEnvironment:
             "money_k": money_k,
             "money": money,
             "money2": money2,
-            "date": date,
+            # Templates still call date(value, fmt); the order comes from the env.
+            "date": partial(date, day_first=True) if day_first else date,
             "qr": qr,
             "sumcol": sumcol,
             "comma": comma,
@@ -449,10 +456,10 @@ def _prefixed_errors() -> Iterator[None]:
         raise TemplateRenderError(f"{ERROR_PREFIX} {exc}") from exc
 
 
-def compile_template(html: str) -> Template:
+def compile_template(html: str, *, day_first: bool = False) -> Template:
     """Compile a template once so batch jobs don't re-parse it per row."""
     with _prefixed_errors():
-        return get_env().from_string(html)
+        return get_env(day_first=day_first).from_string(html)
 
 
 def render_compiled(template: Template, row: dict) -> str:
@@ -460,16 +467,17 @@ def render_compiled(template: Template, row: dict) -> str:
         return template.render(**row)
 
 
-def validate_and_render(html: str, row: dict) -> str:
-    return render_compiled(compile_template(html), row)
+def validate_and_render(html: str, row: dict, *, day_first: bool = False) -> str:
+    return render_compiled(compile_template(html, day_first=day_first), row)
 
 
 # Older name for validate_and_render, kept for existing callers.
 render_row = validate_and_render
 
 
-def render_text(template_str: str, row: dict) -> str:
+def render_text(template_str: str, row: dict, *, day_first: bool = False) -> str:
     """Render a plain-text template (filename patterns and other non-HTML
     strings) without autoescaping — entity-escaped output would corrupt them."""
     with _prefixed_errors():
-        return get_env(autoescape=False).from_string(template_str).render(**row)
+        env = get_env(autoescape=False, day_first=day_first)
+        return env.from_string(template_str).render(**row)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- New keyword `day_first` on `parse_date`, `date`, `get_env`,
+  `compile_template`, `validate_and_render`/`render_row`, `render_text` and
+  `render_filename` (and `--day-first` on the `render`, `batch` and `thumbnail`
+  commands) reads ambiguous numeric dates such as `03/04/2026` day-first.
+  The default is unchanged (month-first). Dates only one order can parse, ISO
+  dates, Excel serials and date objects give the same result in both modes.
+
 ## 0.3.1
 
 - Date inference: a column typed as a date from dotted or unpadded numeric

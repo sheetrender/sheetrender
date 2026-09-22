@@ -146,3 +146,57 @@ def test_date_preserves_strict_undefined():
 
     with pytest.raises(TemplateError, match="Template render error:"):
         render_row("{{ unknown|date }}", {})
+
+
+@pytest.mark.parametrize("separator", ["/", ".", "-"])
+def test_day_first_flips_only_ambiguous_numeric_dates(separator):
+    from sheetrender.templating import parse_date
+
+    ambiguous = separator.join(["03", "04", "2026"])
+    assert parse_date(ambiguous) == datetime(2026, 3, 4)
+    assert parse_date(ambiguous, day_first=True) == datetime(2026, 4, 3)
+    assert format_date(ambiguous, "%Y-%m-%d") == "2026-03-04"
+    assert format_date(ambiguous, "%Y-%m-%d", day_first=True) == "2026-04-03"
+    for unambiguous in (separator.join(["13", "04", "2026"]), separator.join(["04", "13", "2026"])):
+        assert parse_date(unambiguous) == parse_date(unambiguous, day_first=True) == datetime(2026, 4, 13)
+
+
+@pytest.mark.parametrize("value", [
+    date(2026, 3, 4), datetime(2026, 3, 4, 14, tzinfo=UTC), "2026-03-04",
+    "2026-03-04T14:00:00Z", 46085, 46085.5,
+])
+def test_day_first_leaves_iso_serials_and_date_objects_alone(value):
+    assert format_date(value, day_first=True) == format_date(value) == "Mar 4, 2026"
+
+
+def test_day_first_env_and_render_helpers():
+    from sheetrender.filenames import render_filename
+    from sheetrender.templating import (
+        compile_template,
+        render_text,
+        validate_and_render,
+    )
+
+    row = {"d": "03/04/2026"}
+    html = '{{ d|date }} / {{ d|date("%d %B %Y") }}'
+    assert get_env().from_string(html).render(**row) == "Mar 4, 2026 / 04 March 2026"
+    assert get_env(day_first=True).from_string(html).render(**row) == "Apr 3, 2026 / 03 April 2026"
+    assert render_row(html, row) == "Mar 4, 2026 / 04 March 2026"
+    assert render_row(html, row, day_first=True) == "Apr 3, 2026 / 03 April 2026"
+    assert validate_and_render(html, row, day_first=True) == "Apr 3, 2026 / 03 April 2026"
+    assert compile_template(html, day_first=True).render(**row) == "Apr 3, 2026 / 03 April 2026"
+    assert render_text("{{ d|date('%Y-%m-%d') }}", row) == "2026-03-04"
+    assert render_text("{{ d|date('%Y-%m-%d') }}", row, day_first=True) == "2026-04-03"
+    assert render_filename("inv {{ d|date('%Y-%m-%d') }}", row, 0) == "inv 2026-03-04.pdf"
+    assert render_filename("inv {{ d|date('%Y-%m-%d') }}", row, 0, day_first=True) == "inv 2026-04-03.pdf"
+
+
+def test_cli_day_first_flag_reaches_filenames():
+    from sheetrender.cli import _batch_filenames, _build_parser
+
+    assert _build_parser().parse_args(["render", "t.html", "-o", "o.pdf"]).day_first is False
+    args = _build_parser().parse_args(["batch", "t.html", "d.csv", "-o", "out", "--day-first"])
+    assert args.day_first is True
+    units = [(0, {"d": "03/04/2026"})]
+    assert _batch_filenames(units, "{{ d|date('%Y-%m-%d') }}", False) == ["2026-03-04.pdf"]
+    assert _batch_filenames(units, "{{ d|date('%Y-%m-%d') }}", False, day_first=True) == ["2026-04-03.pdf"]
