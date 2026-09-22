@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import base64
+import io
 import math
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from datetime import date as Date
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 
+import segno
 from jinja2 import (
     StrictUndefined,
     Template,
     TemplateError,
     TemplateSyntaxError,
+    Undefined,
     select_autoescape,
 )
 from jinja2 import filters as _jinja_filters
@@ -47,7 +53,7 @@ def _to_number(x) -> float | None:
     """float(x) for the formatting filters, or None if x is not a finite number."""
     try:
         v = float(x)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return v if math.isfinite(v) else None
 
@@ -57,11 +63,16 @@ def _sign(v: float, digits: int) -> str:
     return "-" if round(v, digits) < 0 else ""
 
 
-def money_k(x):
+def _currency_prefix(currency) -> str:
+    code = str(currency or "USD").strip().upper()
+    return {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}.get(code, code + " ")
+
+
+def money_k(x, currency="USD"):
     v = _to_number(x)
     if v is None:
         return ""
-    prefix = f"{_sign(v, 0)}$"
+    prefix = f"{_sign(v, 0)}{_currency_prefix(currency)}"
     v = abs(v)
     # Thresholds sit half a unit below the round number so a value that rounds
     # up to it moves to the next suffix: 999,999 is "$1M", not "$1000K".
@@ -73,18 +84,87 @@ def money_k(x):
     return f"{prefix}{round(v)}"
 
 
-def money(x):
+def money(x, currency="USD"):
     v = _to_number(x)
     if v is None:
         return ""
-    return f"{_sign(v, 0)}${abs(v):,.0f}"
+    return f"{_sign(v, 0)}{_currency_prefix(currency)}{abs(v):,.0f}"
 
 
-def money2(x):
+def money2(x, currency="USD"):
     v = _to_number(x)
     if v is None:
         return ""
-    return f"{_sign(v, 2)}${abs(v):,.2f}"
+    return f"{_sign(v, 2)}{_currency_prefix(currency)}{abs(v):,.2f}"
+
+
+def parse_date(value, *, excel_serial: bool = True) -> Date | None:
+    """Parse dates without locale guessing; ambiguous numeric dates are month-first.
+
+    Excel's 1900 system is supported from serial 1 through 73415 (2100-12-31).
+    Serial 60 shares 1900-02-28 with 59, matching Excel readers' leap-day fix.
+    Numeric strings stay text so identifiers do not become dates at ingest.
+    """
+    if isinstance(value, Undefined):
+        value = str(value)
+    if isinstance(value, Date):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if excel_serial and 1 <= value < 73416:
+            return datetime(1899, 12, 30) + timedelta(days=value + (value < 60))
+        return None
+    if not isinstance(value, str) or not value.strip() or len(value) > 128:
+        return None
+    value = value.strip()
+    if value.isdecimal():
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        pass
+    for separator in ("/", ".", "-"):
+        for order in ("%m{sep}%d{sep}%Y", "%d{sep}%m{sep}%Y"):
+            try:
+                return datetime.strptime(value, order.format(sep=separator))
+            except ValueError:
+                pass
+    return None
+
+
+def date(value, fmt="%b %-d, %Y") -> str:
+    """Format a date, returning empty text for blank or unparseable input."""
+    try:
+        parsed = parse_date(value)
+        # strftime widths allocate before the sandbox can check the result.
+        if parsed is None or not isinstance(fmt, str) or len(fmt) > 128:
+            return ""
+        if any(int(width) > 128 for width in re.findall(r"%[-_0^#]*([0-9]+)", fmt)):
+            return ""
+        return parsed.strftime(fmt)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def qr(value, size=128) -> str:
+    """SVG data URI, with a pixel size clamped to 16..2048 and a 1000-char cap.
+
+    Oversized input returns empty text, never a code for a truncated value.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if not text.strip() or len(text) > 1000:
+        return ""
+    try:
+        size = max(16, min(2048, int(size)))
+        code = segno.make_qr(text)
+        output = io.BytesIO()
+        code.save(output, kind="svg", scale=size / code.symbol_size()[0], light="white")
+        return "data:image/svg+xml;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+    except (TypeError, ValueError, OverflowError):
+        return ""
 
 
 def sumcol(items, key):
@@ -312,6 +392,8 @@ def get_env(*, autoescape: bool = True) -> SandboxedEnvironment:
             "money_k": money_k,
             "money": money,
             "money2": money2,
+            "date": date,
+            "qr": qr,
             "sumcol": sumcol,
             "comma": comma,
             "comma2": comma2,

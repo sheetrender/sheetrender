@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- `date` formats date/datetime objects, ISO dates and timestamps, common numeric
+  date strings, and Excel 1900-system serials 1..73415. Ambiguous day/month
+  strings are month-first (US). Default: `%b %-d, %Y`; pass a strftime format
+  for another layout. Blank or invalid values produce empty text.
+- `money`, `money2`, and `money_k` accept a currency code, including the keyword
+  `currency`. USD remains the default; EUR/GBP/JPY use symbols and other codes
+  use a code plus a space. Precision and negative-sign handling are unchanged.
+- `qr` returns an SVG data URI for use in an image `src`. Optional `size` is
+  pixels (default 128, clamped to 16..2048). Blank, unencodable, or over-1000-character
+  input returns empty text. Segno generates the code locally.
+
 ## 0.2.0
 
 Minor version because some output changes: CSV number inference, column keys

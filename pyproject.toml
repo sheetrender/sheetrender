@@ -1,6 +1,6 @@
 [project]
 name = "sheetrender"
-version = "0.2.0"
+version = "0.3.0"
 description = "Spreadsheet + HTML template in, a PDF per row out. The batch rendering engine behind sheetrender.com."
 readme = "README.md"
 license = "MIT"
@@ -39,6 +39,7 @@ dependencies = [
   "pypdfium2>=5",
   "pillow>=11",
   "openpyxl>=3.1",
+  "segno>=1.6.6,<2",
 ]
 
 [project.scripts]
