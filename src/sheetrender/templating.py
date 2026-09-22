@@ -413,7 +413,8 @@ def get_env(*, autoescape: bool = True, day_first: bool = False) -> SandboxedEnv
             "money_k": money_k,
             "money": money,
             "money2": money2,
-            # Templates still call date(value, fmt); the order comes from the env.
+            # Templates still call date(value, fmt) and get the env's order by
+            # default; a template may still pass day_first itself.
             "date": partial(date, day_first=True) if day_first else date,
             "qr": qr,
             "sumcol": sumcol,
