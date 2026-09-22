@@ -9,7 +9,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from sheetrender.column_keys import sanitize_columns
-from sheetrender.templating import parse_date
+from sheetrender.templating import date_needs_confirmation, parse_date
 
 
 class TooManyCellsError(ValueError):
@@ -64,14 +64,8 @@ def _is_empty_row(values: tuple[Any, ...]) -> bool:
     return all(v is None for v in values)
 
 
-def _infer_type(first_value: Any) -> str:
-    if parse_date(first_value, excel_serial=False) is not None:
-        return "date"
-    is_number = isinstance(first_value, int | float) and not isinstance(first_value, bool)
-    return "number" if is_number else "string"
-
-
 def _json_row(keys: list[str], values: tuple[Any, ...]) -> dict[str, Any]:
+    # Only preview samples cross the JSON boundary; iter_rows preserves cells.
     return {
         key: value.isoformat() if isinstance(value, date) else value
         for key, value in zip(keys, values, strict=True)
@@ -109,8 +103,10 @@ def _summarize(
     if populated_cells > max_cells:
         raise TooManyCellsError(_too_many_cells_message(max_cells))
 
-    # A column's type is the type of its first populated cell.
-    first_values: list[Any] = [None] * len(keys)
+    # Infer within the same bounded window as the app's compatibility shim.
+    inferred_types = ["string"] * len(keys)
+    pending = set(range(len(keys)))
+    candidates: set[int] = set()
     sample_rows: list[dict[str, Any]] = []
     row_count = 0
     for values in data_rows:
@@ -118,15 +114,25 @@ def _summarize(
         populated_cells += sum(1 for v in values if v is not None)
         if populated_cells > max_cells:
             raise TooManyCellsError(_too_many_cells_message(max_cells))
-        for index, value in enumerate(values):
-            if first_values[index] is None:
-                first_values[index] = value
+        if row_count <= 5000:
+            for index in list(pending):
+                value = values[index]
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    continue
+                if parse_date(value, excel_serial=False) is not None:
+                    if index not in candidates and date_needs_confirmation(value):
+                        candidates.add(index)
+                        continue
+                    inferred_types[index] = "date"
+                elif index not in candidates and isinstance(value, (int, float)) and not isinstance(value, bool):
+                    inferred_types[index] = "number"
+                pending.remove(index)
         if len(sample_rows) < _SAMPLE_ROW_COUNT:
             sample_rows.append(_json_row(keys, values))
 
     columns = [
-        {"original": original, "key": key, "inferred_type": _infer_type(first_value)}
-        for original, key, first_value in zip(originals, keys, first_values, strict=True)
+        {"original": original, "key": key, "inferred_type": inferred_type}
+        for original, key, inferred_type in zip(originals, keys, inferred_types, strict=True)
     ]
     return {
         "sheet_name": sheet_name,
@@ -169,7 +175,7 @@ def _iter_rows_csv(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
         reader = _csv.reader(f)
         next(reader, None)
         for values in _csv_data_rows(reader, len(keys)):
-            yield _json_row(keys, values)
+            yield dict(zip(keys, values, strict=True))
 
 
 def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
@@ -178,7 +184,7 @@ def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
         rows = wb.worksheets[0].iter_rows(values_only=True)
         next(rows, None)
         for values in _xlsx_data_rows(rows, len(keys)):
-            yield _json_row(keys, values)
+            yield dict(zip(keys, values, strict=True))
     finally:
         wb.close()
 
