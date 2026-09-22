@@ -6,8 +6,8 @@ from xml.etree import ElementTree
 import pytest
 import segno
 
-from sheetrender.templating import get_env, money, money2, money_k, qr, render_row
 from sheetrender.templating import date as format_date
+from sheetrender.templating import get_env, money, money2, money_k, qr, render_row
 
 
 @pytest.mark.parametrize("value", [
