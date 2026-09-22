@@ -115,6 +115,15 @@ def test_ambiguous_dates_need_two_nonblank_agreeing_cells(tmp_path, first, secon
     assert parse_csv(str(path))["columns"][0]["inferred_type"] == "string"
 
 
+def test_ambiguous_date_column_with_a_later_version_string_stays_string(tmp_path):
+    from sheetrender.sheets import parse_csv
+
+    path = tmp_path / "versions.csv"
+    path.write_text("Version,Due\n1.2.2024,1.2.2024\n10.11.2023,10.11.2023\n2.0.1,\n")
+    by_key = {column["key"]: column["inferred_type"] for column in parse_csv(str(path))["columns"]}
+    assert by_key == {"version": "string", "due": "date"}
+
+
 def test_date_detection_stops_at_5000_rows(tmp_path):
     from sheetrender.sheets import parse_csv
 

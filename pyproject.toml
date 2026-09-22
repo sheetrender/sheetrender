@@ -1,6 +1,6 @@
 [project]
 name = "sheetrender"
-version = "0.3.0"
+version = "0.3.1"
 description = "Spreadsheet + HTML template in, a PDF per row out. The batch rendering engine behind sheetrender.com."
 readme = "README.md"
 license = "MIT"

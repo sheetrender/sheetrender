@@ -107,6 +107,9 @@ def _summarize(
     inferred_types = ["string"] * len(keys)
     pending = set(range(len(keys)))
     candidates: set[int] = set()
+    # Ambiguous forms (1.2.2024) are also version numbers, so a column typed
+    # from them stays under watch: any later non-date cell makes it a string.
+    watched: set[int] = set()
     sample_rows: list[dict[str, Any]] = []
     row_count = 0
     for values in data_rows:
@@ -120,10 +123,18 @@ def _summarize(
                 if value is None or (isinstance(value, str) and not value.strip()):
                     continue
                 if parse_date(value, excel_serial=False) is not None:
-                    if index not in candidates and date_needs_confirmation(value):
-                        candidates.add(index)
+                    if index in watched:
+                        continue
+                    if date_needs_confirmation(value):
+                        if index not in candidates:
+                            candidates.add(index)
+                            continue
+                        inferred_types[index] = "date"
+                        watched.add(index)
                         continue
                     inferred_types[index] = "date"
+                elif index in watched:
+                    inferred_types[index] = "string"
                 elif index not in candidates and isinstance(value, (int, float)) and not isinstance(value, bool):
                     inferred_types[index] = "number"
                 pending.remove(index)

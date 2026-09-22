@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Date inference: a column typed as a date from dotted or unpadded numeric
+  strings becomes a string again when a later nonblank cell (within the first
+  5,000 rows) is not a date, so version numbers such as `1.2.2024` and
+  `2.0.1` in one column stay text.
+
 ## 0.3.0
 
 - `date` formats date/datetime objects, ISO dates and timestamps, common numeric
