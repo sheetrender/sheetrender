@@ -95,7 +95,8 @@ def money2(x, currency="USD"):
     v = _to_number(x)
     if v is None:
         return ""
-    return f"{_sign(v, 2)}{_currency_prefix(currency)}{abs(v):,.2f}"
+    digits = 0 if str(currency).strip().upper() in {"JPY", "KRW"} else 2
+    return f"{_sign(v, digits)}{_currency_prefix(currency)}{abs(v):,.{digits}f}"
 
 
 def parse_date(value, *, excel_serial: bool = True) -> Date | None:
@@ -104,11 +105,12 @@ def parse_date(value, *, excel_serial: bool = True) -> Date | None:
     Excel's 1900 system is supported from serial 1 through 73415 (2100-12-31).
     Serial 60 shares 1900-02-28 with 59, matching Excel readers' leap-day fix.
     Numeric strings stay text so identifiers do not become dates at ingest.
+    Ingest detection (excel_serial=False) accepts only years 1900..2100.
     """
     if isinstance(value, Undefined):
         value = str(value)
     if isinstance(value, Date):
-        return value
+        return value if excel_serial or 1900 <= value.year <= 2100 else None
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -121,16 +123,29 @@ def parse_date(value, *, excel_serial: bool = True) -> Date | None:
     if value.isdecimal():
         return None
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
     except ValueError:
         pass
     for separator in ("/", ".", "-"):
         for order in ("%m{sep}%d{sep}%Y", "%d{sep}%m{sep}%Y"):
             try:
-                return datetime.strptime(value, order.format(sep=separator))
+                parsed = datetime.strptime(value, order.format(sep=separator))
+                return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
             except ValueError:
                 pass
     return None
+
+
+def date_needs_confirmation(value) -> bool:
+    """Dotted or unpadded numeric strings need another date cell at ingest."""
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    return bool(
+        re.fullmatch(r"\d{1,2}\.\d{1,2}\.\d{4}", value)
+        or re.fullmatch(r"(?:\d[/\-]\d{1,2}|\d{1,2}[/\-]\d)[/\-]\d{4}", value)
+    )
 
 
 def date(value, fmt="%b %-d, %Y") -> str:

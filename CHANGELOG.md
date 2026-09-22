@@ -8,7 +8,11 @@
   for another layout. Blank or invalid values produce empty text.
 - `money`, `money2`, and `money_k` accept a currency code, including the keyword
   `currency`. USD remains the default; EUR/GBP/JPY use symbols and other codes
-  use a code plus a space. Precision and negative-sign handling are unchanged.
+  use a code plus a space. `money2` uses zero decimals for JPY and KRW.
+- Date inference checks years 1900..2100 and requires a second nonblank date
+  for dotted or unpadded numeric strings, within the first 5,000 rows.
+  Rendering rows preserve native date/datetime values; only dataset preview
+  `sample_rows` convert those values to ISO strings for JSON storage/responses.
 - `qr` returns an SVG data URI for use in an image `src`. Optional `size` is
   pixels (default 128, clamped to 16..2048). Blank, unencodable, or over-1000-character
   input returns empty text. Segno generates the code locally.

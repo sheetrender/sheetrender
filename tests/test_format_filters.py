@@ -47,10 +47,10 @@ def test_date_format_bounds(fmt):
 ])
 def test_currencies(currency, prefix):
     assert money(1234, currency) == prefix + "1,234"
-    assert money2(-1234.56, currency) == "-" + prefix + "1,234.56"
+    assert money2(-1234.56, currency) == "-" + prefix + ("1,235" if currency == "JPY" else "1,234.56")
     assert money_k(-1234, currency) == "-" + prefix + "1K"
     assert money(-0.4, currency) == prefix + "0"
-    assert money2(-0.004, currency) == prefix + "0.00"
+    assert money2(-0.004, currency) == prefix + ("0" if currency == "JPY" else "0.00")
     assert money_k(-0.4, currency) == prefix + "0"
 
 
@@ -59,6 +59,30 @@ def test_default_currency_and_keyword():
     assert money2(1234) == "$1,234.00"
     assert money_k(999999) == "$1M"
     assert render_row('{{ amount|money(currency="EUR") }}', {"amount": 1234}) == "€1,234"
+
+
+@pytest.mark.parametrize("currency,prefix", [("JPY", "¥"), ("KRW", "KRW "), (" jpy ", "¥")])
+def test_money2_zero_decimal_currencies(currency, prefix):
+    assert money2(1234, currency) == prefix + "1,234"
+    assert money2(1234.6, currency) == prefix + "1,235"
+    assert money2(-0.4, currency) == prefix + "0"
+    assert money2(-1234.6, currency) == "-" + prefix + "1,235"
+
+
+@pytest.mark.parametrize("value", [
+    "1899-12-31", "2101-01-01", "12/31/1899", "01.01.2101",
+    "13.32.2024", "02/30/2024", "555-123-4567", "02134", "12345", 46287,
+    date(1899, 12, 31), datetime(2101, 1, 1),
+])
+def test_ingest_date_detection_rejects_identifiers_and_implausible_dates(value):
+    from sheetrender.templating import parse_date
+
+    assert parse_date(value, excel_serial=False) is None
+
+
+def test_date_filter_can_explicitly_format_years_outside_ingest_window():
+    assert format_date("1899-12-31", "%Y-%m-%d") == "1899-12-31"
+    assert format_date("2101-01-01", "%Y-%m-%d") == "2101-01-01"
 
 
 @pytest.mark.parametrize("formatter", [money, money2, money_k])
