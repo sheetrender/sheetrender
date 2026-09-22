@@ -3,11 +3,13 @@ from __future__ import annotations
 import csv as _csv
 import re
 from collections.abc import Iterable, Iterator, Sequence
+from datetime import date
 from typing import Any
 
 from openpyxl import load_workbook
 
 from sheetrender.column_keys import sanitize_columns
+from sheetrender.templating import parse_date
 
 
 class TooManyCellsError(ValueError):
@@ -63,8 +65,17 @@ def _is_empty_row(values: tuple[Any, ...]) -> bool:
 
 
 def _infer_type(first_value: Any) -> str:
+    if parse_date(first_value, excel_serial=False) is not None:
+        return "date"
     is_number = isinstance(first_value, int | float) and not isinstance(first_value, bool)
     return "number" if is_number else "string"
+
+
+def _json_row(keys: list[str], values: tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        key: value.isoformat() if isinstance(value, date) else value
+        for key, value in zip(keys, values, strict=True)
+    }
 
 
 def _xlsx_data_rows(rows: Iterable[Sequence[Any]], width: int) -> Iterator[tuple[Any, ...]]:
@@ -111,7 +122,7 @@ def _summarize(
             if first_values[index] is None:
                 first_values[index] = value
         if len(sample_rows) < _SAMPLE_ROW_COUNT:
-            sample_rows.append(dict(zip(keys, values, strict=True)))
+            sample_rows.append(_json_row(keys, values))
 
     columns = [
         {"original": original, "key": key, "inferred_type": _infer_type(first_value)}
@@ -158,7 +169,7 @@ def _iter_rows_csv(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
         reader = _csv.reader(f)
         next(reader, None)
         for values in _csv_data_rows(reader, len(keys)):
-            yield dict(zip(keys, values, strict=True))
+            yield _json_row(keys, values)
 
 
 def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
@@ -167,7 +178,7 @@ def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
         rows = wb.worksheets[0].iter_rows(values_only=True)
         next(rows, None)
         for values in _xlsx_data_rows(rows, len(keys)):
-            yield dict(zip(keys, values, strict=True))
+            yield _json_row(keys, values)
     finally:
         wb.close()
 
