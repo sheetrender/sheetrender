@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Stored datasets read exactly as 0.4.0 read them.** `parse_xlsx` and
+  `parse_csv` return a new `read_options` value (`{"version": 2,
+  "sheet_index": 1, "header_row": 0, "zero_padded_columns": [3]}` for an
+  `.xlsx`, `{"version": 2, "header_row": 0}` for a CSV). Store it next to the
+  columns and pass it back as `iter_rows(path, columns, read_options)`, and
+  as the new `read_options` keyword of `grouped_render_units`, `scan_groups`
+  and `detect_group_candidates`. Without it, `iter_rows` reads the file the
+  way 0.4.0 did (first sheet, first row as header, stored cell values), so
+  columns saved by 0.4.0 keep their tab, header row, keys and value types.
+  Options it cannot honour (a newer version, a sheet index past the
+  workbook) raise `ValueError` instead of reading something else. The newer
+  reading rules below apply only when `read_options` is passed.
 - A blank cell (`None`) prints as empty text instead of the word "None", in
   templates and in `render_text`/`render_filename`. `{% if x %}` and
   `x is none` still see `None`.
@@ -19,24 +31,28 @@
   `"2026/09/26 3:59:00 PM GMT+1"`; the zone is dropped), year-first slashes
   (`2026/09/26`) and English month names (`"September 26, 2026"`,
   `"26 Sep 2026"`, `"26-Sep-26"`). Ingest types such columns as dates.
-- `.xlsx` integers under a number format of zeros and literal dashes/spaces
-  (Excel's Zip Code `00000`, Zip+4 `00000-0000`, SSN `000-00-0000`, fixed
-  width IDs) are read as the text Excel displays (`"02134"`), not the stored
-  number. Reading now walks cells rather than bare values, about 20% slower
-  on a 1M-cell workbook.
-- `.xlsx` reading skips hidden sheets: the first visible sheet is the data
-  (the first sheet only if all are hidden). `iter_rows` reads the sheet whose
-  header matches the stored columns' `original` names, so columns stored by
-  an older version from a hidden first sheet keep reading that sheet.
+- `.xlsx` columns of ZIP codes and IDs keep their leading zeros. A column
+  is read as the text Excel displays (`"02134"`, `"02134-0001"`,
+  `"012-34-5678"`) when its integers use a format of 3 to 20 zero
+  placeholders in groups split by one literal dash or space (Excel's Zip
+  Code `00000`, Zip+4 `00000-0000`, SSN `000-00-0000`, fixed-width IDs),
+  and that format shows something other than the bare number for at least
+  one of its cells. A column the padding never changes (quantities 100-999
+  under `000`), and any `00` format, stays numeric, so `{{ qty * 2 }}` still
+  multiplies. A quoted or escaped `"0"` is a literal digit, not padding, and
+  formats over 64 characters are ignored. `parse_xlsx` reads cells rather
+  than bare values (about 20% slower on a 1M-cell workbook); `iter_rows`
+  does so only when `zero_padded_columns` is non-empty.
+- `parse_xlsx` reads the first visible sheet (the first sheet only if all
+  are hidden) and records its index in `read_options`.
 - Columns after the last named header that no data row fills are dropped
   (an `.xlsx` formatted wider than its data, a CSV with trailing commas).
   Nameless columns that hold data, and any before the last named header,
   are kept.
-- Completely blank rows above the header are skipped, in `.xlsx` and CSV,
-  by both `parse_*` and `iter_rows`. A title row with text in it is still
-  read as the header. Columns stored by an older version from such a file
-  (all nameless) now render one row fewer: the real header row is no longer
-  yielded as data.
+- The header is always the first row, as in 0.4.0. `sheetrender batch`
+  refuses a file whose first row is blank (it names no columns, and the real
+  headings would render as a document) and says to delete the blank rows;
+  `sheetrender inspect` still shows such a file as it is.
 
 ## 0.4.0
 

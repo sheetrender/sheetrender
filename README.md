@@ -108,7 +108,8 @@ async def main() -> None:
         template = sr.compile_template(Path("template.html").read_text())
         parsed = sr.parse_csv("data.csv")
         async with sr.render_context() as renderer:
-            for i, row in enumerate(sr.iter_rows("data.csv", parsed["columns"])):
+            rows = sr.iter_rows("data.csv", parsed["columns"], parsed["read_options"])
+            for i, row in enumerate(rows):
                 html = sr.render_compiled(template, row)
                 pdf = await renderer.render_pdf(html)
                 (out / f"row_{i:04}.pdf").write_bytes(pdf)
@@ -123,6 +124,12 @@ Renders inside one `render_context` share the browser and are gated to
 `render_thumbnail`, `apply_pdf_metadata`, and the grouping helpers
 (`grouped_render_units`, `group_context`, `detect_group_candidates`) are all
 exported from the package root.
+
+If you store `parse_*`'s columns to read the file again later, store
+`read_options` with them and pass both back to `iter_rows` (and to the
+grouping helpers). They record which tab, header row and zero-padded columns
+the ingest used. Columns stored without them are read the way 0.4.0 read
+them: the first tab even when it is hidden, and ZIP-code formats as numbers.
 
 ## Templates
 

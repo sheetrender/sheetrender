@@ -169,14 +169,15 @@ def test_time_and_duration_cells_keep_sample_rows_json(tmp_path):
     assert result["sample_rows"][0] == {
         "client": "Ann", "appointment_time": "09:30:00", "hours": "1:30:00",
     }
-    row = next(iter_rows(str(path), result["columns"]))
+    row = next(iter_rows(str(path), result["columns"], result["read_options"]))
     template = "{{ appointment_time }} {{ hours }}"
     assert render_row(template, row) == render_row(template, result["sample_rows"][0])
 
 
 def test_zero_padded_number_formats_keep_their_leading_zeros(tmp_path):
     """Excel's "Zip Code" format stores 2134 and shows 02134; the document used
-    to print 2134. Formats of zeros and literal dashes are applied at read."""
+    to print 2134. Formats of zeros and literal dashes are applied at read;
+    a column whose padding never shows (1234567 under 00000) keeps its number."""
     from openpyxl import Workbook
 
     from sheetrender.sheets import iter_rows
@@ -195,11 +196,11 @@ def test_zero_padded_number_formats_keep_their_leading_zeros(tmp_path):
     workbook.save(path)
 
     result = parse_xlsx(str(path))
-    row = next(iter_rows(str(path), result["columns"]))
+    row = next(iter_rows(str(path), result["columns"], result["read_options"]))
 
     assert row == {
         "name": "Ann", "zip": "02134", "zip_4": "02134-0001", "ssn": "012-34-5678",
-        "badge": "000042", "count": 7, "price": 5, "wide": "1234567",
+        "badge": "000042", "count": 7, "price": 5, "wide": 1234567,
     }
     assert result["sample_rows"][0] == row
     types = {c["key"]: c["inferred_type"] for c in result["columns"]}
@@ -231,7 +232,7 @@ def test_a_hidden_first_sheet_is_skipped_for_the_first_visible_one(tmp_path):
 
     assert result["sheet_name"] == "Customers"
     assert [c["key"] for c in result["columns"]] == ["name", "city"]
-    assert list(iter_rows(str(path), result["columns"])) == [
+    assert list(iter_rows(str(path), result["columns"], result["read_options"])) == [
         {"name": "Ann", "city": "Oslo"}, {"name": "Bob", "city": "Rome"},
     ]
 
@@ -269,62 +270,3 @@ def test_trailing_nameless_empty_columns_are_dropped(tmp_path):
     assert list(iter_rows(str(csv_path), csv_result["columns"])) == [
         {"name": "Ann", "amount": 1}, {"name": "Bob", "amount": 2},
     ]
-
-
-def test_blank_rows_above_the_header_are_skipped(tmp_path):
-    """A table that starts a few rows down took the empty first row as its
-    header: nameless columns, and the real header rendered as a document. A CSV
-    opening with blank lines came out with no columns at all."""
-    from openpyxl import Workbook
-
-    from sheetrender.sheets import iter_rows, parse_csv
-
-    path = tmp_path / "lower.xlsx"
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet["B3"], sheet["C3"] = "Name", "Amount"
-    sheet["B4"], sheet["C4"] = "Ann", 5
-    sheet["B5"], sheet["C5"] = "Bob", 6
-    sheet["A2"] = "   "
-    workbook.save(path)
-
-    result = parse_xlsx(str(path))
-
-    assert [c["original"] for c in result["columns"]] == ["", "Name", "Amount"]
-    assert result["row_count"] == 2
-    assert [row["name"] for row in iter_rows(str(path), result["columns"])] == ["Ann", "Bob"]
-
-    csv_path = tmp_path / "lower.csv"
-    csv_path.write_text("\n,,\nName,Amount\nAnn,5\n")
-    csv_result = parse_csv(str(csv_path))
-    assert [c["key"] for c in csv_result["columns"]] == ["name", "amount"]
-    assert list(iter_rows(str(csv_path), csv_result["columns"])) == [{"name": "Ann", "amount": 5}]
-
-
-def test_columns_stored_from_a_hidden_first_sheet_still_read_that_sheet(tmp_path):
-    """Before 0.5 the first sheet was parsed even when hidden. Rendering such a
-    stored dataset must keep reading the sheet its columns came from, not
-    switch to the visible one under the hidden sheet's column names."""
-    from openpyxl import Workbook
-
-    from sheetrender.sheets import iter_rows
-
-    path = tmp_path / "hidden.xlsx"
-    workbook = Workbook()
-    lookup = workbook.active
-    lookup.title = "Lookup"
-    lookup.append(["code", "label"])
-    lookup.append([1, "one"])
-    lookup.sheet_state = "hidden"
-    customers = workbook.create_sheet("Customers")
-    customers.append(["Name", "City"])
-    customers.append(["Ann", "Oslo"])
-    workbook.save(path)
-    old_columns = [
-        {"original": "code", "key": "code", "inferred_type": "number"},
-        {"original": "label", "key": "label", "inferred_type": "string"},
-    ]
-
-    assert list(iter_rows(str(path), old_columns)) == [{"code": 1, "label": "one"}]
-    # Columns without originals (a hand-built list) fall back to the visible sheet.
-    assert list(iter_rows(str(path), [{"key": "a"}, {"key": "b"}])) == [{"a": "Ann", "b": "Oslo"}]

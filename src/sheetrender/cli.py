@@ -253,16 +253,22 @@ def _read_json_object(path_value: str | None) -> dict[str, Any]:
     return value
 
 
-def _parse_dataset(path_value: str) -> dict[str, Any]:
+def _parse_dataset(path_value: str, *, require_header: bool = False) -> dict[str, Any]:
     suffix = Path(path_value).suffix.lower()
+    if suffix not in {".csv", ".xlsx"}:
+        raise CliError(f"Unsupported data file {path_value}; expected .csv or .xlsx")
     try:
-        if suffix == ".csv":
-            return parse_csv(path_value)
-        if suffix == ".xlsx":
-            return parse_xlsx(path_value)
+        dataset = parse_csv(path_value) if suffix == ".csv" else parse_xlsx(path_value)
     except (OSError, ValueError) as exc:
         raise CliError(f"Could not parse {path_value}: {exc}") from exc
-    raise CliError(f"Unsupported data file {path_value}; expected .csv or .xlsx")
+    if require_header and not any(str(column["original"]).strip() for column in dataset["columns"]):
+        # inspect still shows such a file as it is. The first row is always the header. A blank one names no columns,
+        # and the real headings would render as the first document.
+        raise CliError(
+            f"The first row of {path_value} is empty, so it has no column headings. "
+            "Delete the blank rows above your headings, or move them to row 1."
+        )
+    return dataset
 
 
 async def _render_command(args: argparse.Namespace) -> int:
@@ -308,7 +314,7 @@ def _batch_contexts(
     group_column = args.group_by
     if args.group == "auto":
         detection = detect_group_candidates(
-            args.data, dataset["columns"], dataset["row_count"]
+            args.data, dataset["columns"], dataset["row_count"], dataset["read_options"]
         )
         group_column = detection.get("recommended")
         if not group_column:
@@ -322,10 +328,11 @@ def _batch_contexts(
             dataset["columns"],
             None,
             {"group_by": [group_column]},
+            dataset["read_options"],
         )
         return [(group.index, group_context(group)) for group in groups], True
 
-    rows = list(iter_rows(args.data, dataset["columns"]))
+    rows = list(iter_rows(args.data, dataset["columns"], dataset["read_options"]))
     return list(enumerate(rows)), False
 
 
@@ -440,7 +447,7 @@ async def _write_zip(paths: list[Path], zip_path: Path) -> None:
 async def _batch_command(args: argparse.Namespace) -> int:
     source = _read_text(args.template, "template")
     template = compile_template(source, day_first=args.day_first)
-    dataset = _parse_dataset(args.data)
+    dataset = _parse_dataset(args.data, require_header=True)
     units, grouped = _batch_contexts(args, dataset)
     filenames = _batch_filenames(
         units, args.filename, grouped, day_first=args.day_first

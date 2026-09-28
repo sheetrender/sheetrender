@@ -138,12 +138,13 @@ def grouped_render_units(
     columns: list[dict],
     selected_indexes: set[int] | None,
     group_config: dict,
+    read_options: dict | None = None,
 ) -> list[Group]:
     # Selection stays in dataset-index space. Every later consumer uses this
     # same pass so an immutable file and snapshot always reproduce ordinals.
     selected_rows = (
         (index, row)
-        for index, row in enumerate(iter_rows(dataset_path, columns))
+        for index, row in enumerate(iter_rows(dataset_path, columns, read_options))
         if selected_indexes is None or index in selected_indexes
     )
     return iter_groups(selected_rows, group_config)
@@ -158,10 +159,11 @@ def scan_groups(
     dataset_path: str,
     columns: list[dict],
     group_config: dict,
+    read_options: dict | None = None,
 ) -> ScanResult:
     # iter_groups consumes this iterator exactly once; groups must remain in
     # memory anyway because global equality can join distant sheet rows.
-    groups = iter_groups(enumerate(iter_rows(dataset_path, columns)), group_config)
+    groups = iter_groups(enumerate(iter_rows(dataset_path, columns, read_options)), group_config)
     sizes = [len(group.rows) for group in groups]
     n_groups = len(groups)
     min_group_size = min(sizes, default=0)
@@ -204,11 +206,13 @@ def detect_group_candidates(
     dataset_path: str,
     columns: list[dict],
     row_count: int,
+    read_options: dict | None = None,
 ) -> dict:
     """Rank columns as grouping candidates and recommend one, if any qualifies.
 
     `row_count` is only echoed back in the result. The statistics use the rows
-    actually read from the file.
+    actually read from the file. `read_options` is what parse_* returned with
+    `columns` (see iter_rows).
     """
     counters = {column["key"]: Counter() for column in columns}
     blank_counts = {column["key"]: 0 for column in columns}
@@ -216,7 +220,7 @@ def detect_group_candidates(
     # Counting every column in this one pass stays bounded by the upload cell
     # cap and avoids rescanning a remote-sheet snapshot per candidate.
     observed_rows = 0
-    for row in iter_rows(dataset_path, columns):
+    for row in iter_rows(dataset_path, columns, read_options):
         observed_rows += 1
         for column in columns:
             key = column["key"]
