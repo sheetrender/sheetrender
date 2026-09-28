@@ -332,21 +332,54 @@ def _settle_padded(index: int, value: Any, padded: set[int]) -> Any:
 # stored without them (every dataset parsed by 0.4.0 or earlier) are read the
 # way 0.4.0 read them: the first sheet, hidden or not, the first row as the
 # header, and every cell as its stored value.
+#
+# A caller that lets the user choose the tab or the header row passes the
+# choice to parse_* (sheet_index=, header_row=) and stores the read_options
+# that come back; nothing else needs to know about the choice.
 READ_OPTIONS_VERSION = 2
+_READ_OPTION_KEYS = frozenset({"version", "sheet_index", "header_row", "zero_padded_columns"})
 
 
-def parse_xlsx(path: str, max_cells: int | None = None) -> dict[str, Any]:
-    """Describe an .xlsx: its first visible sheet, header on the first row.
+def _choice(value: Any, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer, not {value!r}")
+    return value
 
-    Returns sheet_name, columns, row_count, sample_rows and read_options.
+
+def _skip(rows: Iterator[Any], count: int) -> None:
+    for _ in range(count):
+        if next(rows, None) is None:
+            return
+
+
+def parse_xlsx(
+    path: str,
+    max_cells: int | None = None,
+    *,
+    sheet_index: int | None = None,
+    header_row: int = 0,
+) -> dict[str, Any]:
+    """Describe one sheet of an .xlsx.
+
+    The sheet is `sheet_index` (0-based, hidden sheets included), or by
+    default the first visible one. The header is row `header_row` (0-based,
+    default the first row); rows above it are ignored. Returns sheet_name,
+    columns, row_count, sample_rows and read_options.
     """
     if max_cells is None:
         max_cells = DEFAULT_MAX_CELLS
+    header_row = _choice(header_row, "header_row")
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        sheet_index = _visible_sheet_index(wb)
+        if sheet_index is None:
+            sheet_index = _visible_sheet_index(wb)
+        elif _choice(sheet_index, "sheet_index") >= len(wb.worksheets):
+            raise ValueError(
+                f"sheet_index {sheet_index} is past this workbook's {len(wb.worksheets)} sheet(s)"
+            )
         ws = wb.worksheets[sheet_index]
         rows = ws.iter_rows()
+        _skip(rows, header_row)
         header_cells = next(rows, None)
         if header_cells is None:
             raise ValueError("Workbook has no header row")
@@ -358,36 +391,37 @@ def parse_xlsx(path: str, max_cells: int | None = None) -> dict[str, Any]:
     result["read_options"] = {
         "version": READ_OPTIONS_VERSION,
         "sheet_index": sheet_index,
-        "header_row": 0,
+        "header_row": header_row,
         "zero_padded_columns": result.pop("zero_padded_columns"),
     }
     return result
 
 
-def parse_csv(path: str, max_cells: int | None = None) -> dict[str, Any]:
-    """Describe a UTF-8, comma-separated CSV whose header is the first row.
+def parse_csv(path: str, max_cells: int | None = None, *, header_row: int = 0) -> dict[str, Any]:
+    """Describe a UTF-8, comma-separated CSV.
 
-    Returns sheet_name ("csv"), columns, row_count, sample_rows and read_options.
+    The header is row `header_row` (0-based, default the first row); rows
+    above it are ignored. Returns sheet_name ("csv"), columns, row_count,
+    sample_rows and read_options.
     """
     if max_cells is None:
         max_cells = DEFAULT_MAX_CELLS
+    header_row = _choice(header_row, "header_row")
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = _csv.reader(f)
-        header_row = next(reader, None)
-        if header_row is None:
+        _skip(reader, header_row)
+        header = next(reader, None)
+        if header is None:
             raise ValueError("CSV has no header row")
-        originals = [h.strip() for h in header_row]
+        originals = [h.strip() for h in header]
         result = _summarize("csv", originals, _csv_data_rows(reader, len(originals)), max_cells)
     del result["zero_padded_columns"]
-    result["read_options"] = {"version": READ_OPTIONS_VERSION, "header_row": 0}
+    result["read_options"] = {"version": READ_OPTIONS_VERSION, "header_row": header_row}
     return result
 
 
 def _checked_index(read_options: dict[str, Any], name: str) -> int:
-    value = read_options.get(name, 0)
-    if type(value) is not int or value < 0:
-        raise ValueError(f"read_options {name} must be a non-negative integer, not {value!r}")
-    return value
+    return _choice(read_options.get(name, 0), f"read_options {name}")
 
 
 def _checked_read_options(read_options: Any) -> tuple[int, int, frozenset[int]]:
@@ -401,6 +435,9 @@ def _checked_read_options(read_options: Any) -> tuple[int, int, frozenset[int]]:
             f"Unsupported read_options {read_options!r}; this sheetrender reads "
             f"version {READ_OPTIONS_VERSION}"
         )
+    unknown = set(read_options) - _READ_OPTION_KEYS
+    if unknown:
+        raise ValueError(f"read_options has keys this sheetrender cannot honour: {sorted(unknown)}")
     padded = read_options.get("zero_padded_columns", [])
     if not isinstance(padded, list) or any(type(i) is not int or i < 0 for i in padded):
         raise ValueError(f"read_options zero_padded_columns must list column indexes, not {padded!r}")
@@ -409,12 +446,6 @@ def _checked_read_options(read_options: Any) -> tuple[int, int, frozenset[int]]:
         _checked_index(read_options, "header_row"),
         frozenset(padded),
     )
-
-
-def _skip(rows: Iterator[Any], count: int) -> None:
-    for _ in range(count):
-        if next(rows, None) is None:
-            return
 
 
 def _iter_rows_csv(path: str, keys: list[str], header_row: int) -> Iterator[dict[str, Any]]:

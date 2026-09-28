@@ -524,3 +524,50 @@ def test_the_cli_refuses_a_file_whose_first_row_is_blank(tmp_path):
     for name in ("csv_blank_header_then_data", "table_starts_lower_down", "csv_blank_lines_above_header"):
         with pytest.raises(CliError, match="first row"):
             _parse_dataset(build_case(tmp_path, name), require_header=True)
+
+
+def test_parse_reads_the_tab_and_header_row_a_caller_chose(tmp_path):
+    """A service that lets the user pick the tab or the header row (a title
+    row above the headings) parses with that choice, and the read_options it
+    gets back make iter_rows read the same way."""
+    from sheetrender.sheets import parse_csv, parse_xlsx
+
+    path = tmp_path / "choice.xlsx"
+    workbook = Workbook()
+    first = workbook.active
+    first.title = "Summary"
+    first.append(["Total", 5])
+    second = workbook.create_sheet("Orders")
+    second.append(["Quarterly orders"])
+    second.append([])
+    second.append(["Name", "Zip"])
+    second.append(["Ann", 2134])
+    second["B4"].number_format = "00000"
+    workbook.save(path)
+
+    parsed = parse_xlsx(str(path), sheet_index=1, header_row=2)
+    assert parsed["sheet_name"] == "Orders"
+    assert parsed["read_options"] == {
+        "version": 2, "sheet_index": 1, "header_row": 2, "zero_padded_columns": [1],
+    }
+    assert [c["original"] for c in parsed["columns"]] == ["Name", "Zip"]
+    assert parsed["sample_rows"] == _read(str(path), parsed) == [{"name": "Ann", "zip": "02134"}]
+
+    csv_path = tmp_path / "choice.csv"
+    csv_path.write_text("Quarterly orders\n\nName,Amount\nAnn,5\n")
+    parsed = parse_csv(str(csv_path), header_row=2)
+    assert parsed["read_options"] == {"version": 2, "header_row": 2}
+    assert parsed["sample_rows"] == _read(str(csv_path), parsed) == [{"name": "Ann", "amount": 5}]
+
+    with pytest.raises(ValueError):
+        parse_xlsx(str(path), sheet_index=2)
+    with pytest.raises(ValueError):
+        parse_xlsx(str(path), header_row=-1)
+
+
+def test_read_options_with_keys_this_version_does_not_know_are_refused(tmp_path):
+    """A later reader may add a key (a delimiter, say). Ignoring it would read
+    the file some other way, so an older reader refuses instead."""
+    path = build_case(tmp_path, "csv_trailing_commas")
+    with pytest.raises(ValueError, match="delimiter"):
+        list(iter_rows(path, [{"key": "a"}], read_options={"version": 2, "delimiter": "\t"}))

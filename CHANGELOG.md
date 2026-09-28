@@ -11,9 +11,13 @@
   and `detect_group_candidates`. Without it, `iter_rows` reads the file the
   way 0.4.0 did (first sheet, first row as header, stored cell values), so
   columns saved by 0.4.0 keep their tab, header row, keys and value types.
-  Options it cannot honour (a newer version, a sheet index past the
-  workbook) raise `ValueError` instead of reading something else. The newer
-  reading rules below apply only when `read_options` is passed.
+  Options it cannot honour (a newer version, an unknown key, a sheet index
+  past the workbook) raise `ValueError` instead of reading something else.
+  The newer reading rules below apply only when `read_options` is passed.
+- `parse_xlsx(path, sheet_index=..., header_row=...)` and
+  `parse_csv(path, header_row=...)` read a tab and header row the caller
+  chose (a tab picker, a title row above the headings); rows above the
+  header are ignored, and the returned `read_options` record the choice.
 - A blank cell (`None`) prints as empty text instead of the word "None", in
   templates and in `render_text`/`render_filename`. `{% if x %}` and
   `x is none` still see `None`.
