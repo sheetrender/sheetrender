@@ -403,10 +403,23 @@ def _bounded_format(value, *args, **kwargs):
     return _jinja_filters.do_format(value, *args, **kwargs)
 
 
+def _blank_none(value):
+    """Print a blank cell as nothing, not as the word "None".
+
+    Spreadsheet rows carry None for every empty cell, and Jinja prints None
+    as "None": an optional column (address line 2, a middle name, a note)
+    put the literal word on every document whose cell was empty, and into
+    the filename. Only output is affected; `{% if x %}` and `x is none`
+    still see None.
+    """
+    return "" if value is None else value
+
+
 def get_env(*, autoescape: bool = True, day_first: bool = False) -> SandboxedEnvironment:
     env = BoundedSandboxedEnvironment(
         autoescape=select_autoescape(default=True) if autoescape else False,
         undefined=StrictUndefined,
+        finalize=_blank_none,
     )
     env.filters.update(
         {

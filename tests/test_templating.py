@@ -186,3 +186,20 @@ class TestRunawayOperators:
 
     def test_float_and_negative_exponents_are_not_flagged(self):
         assert self._render("{{ 2 ** -1 }} {{ 2.0 ** 3 }}") == "0.5 8.0"
+
+
+def test_blank_cell_prints_nothing_not_none():
+    """An empty optional cell used to print the word "None" in the document."""
+    from sheetrender.filenames import render_filename
+    from sheetrender.templating import render_text
+
+    row = {"name": "Ann", "address_2": None}
+    html = "<p>{{ name }}</p><p>{{ address_2 }}</p>"
+    assert validate_and_render(html, row) == "<p>Ann</p><p></p>"
+    assert render_text("{{ name }} {{ address_2 }}", row) == "Ann "
+    # Tests still see the real None.
+    assert validate_and_render("{% if address_2 is none %}blank{% endif %}", row) == "blank"
+    assert validate_and_render("{{ address_2 or 'n/a' }}", row) == "n/a"
+    # Filenames fall back instead of shipping "None.pdf".
+    assert render_filename("{{ address_2 }}", row, 0) == "row_1.pdf"
+    assert render_filename("Letter - {{ name }} {{ address_2 }}", row, 0) == "Letter - Ann.pdf"

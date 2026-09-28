@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A blank cell (`None`) prints as empty text instead of the word "None", in
+  templates and in `render_text`/`render_filename`. `{% if x %}` and
+  `x is none` still see `None`.
+
 ## 0.4.0
 
 - New keyword `day_first` on `parse_date`, `date`, `get_env`,
