@@ -124,6 +124,30 @@ def _xlsx_values(ws: Any) -> Iterator[tuple[Any, ...]]:
         yield tuple(_xlsx_value(cell) for cell in row)
 
 
+def _is_blank_cell(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _header_row(rows: Iterator[Sequence[Any]]) -> Sequence[Any] | None:
+    """Consume rows up to and including the header, the first non-blank row.
+
+    A sheet whose table starts a few rows down, or a CSV that opens with blank
+    lines, used to take the empty first row as its header: every column became
+    a nameless col_ (or, for the CSV, there were no columns at all) and the
+    real header row turned into the first document. A completely blank row can
+    never be a header, so skipping it is not a guess. Parsing and iter_rows
+    both call this, so they agree on where the data starts.
+    """
+    first = None
+    for row in rows:
+        if first is None:
+            first = row
+        if not all(_is_blank_cell(value) for value in row):
+            return row
+    # Nothing but blank rows: the first one stands, as it always did.
+    return first
+
+
 def _data_sheet(wb: Any) -> Any:
     """The first sheet the workbook's owner can see.
 
@@ -243,7 +267,7 @@ def parse_xlsx(path: str, max_cells: int | None = None) -> dict[str, Any]:
     try:
         ws = _data_sheet(wb)
         rows = _xlsx_values(ws)
-        header_row = next(rows, None)
+        header_row = _header_row(rows)
         if header_row is None:
             raise ValueError("Workbook has no header row")
         originals = ["" if h is None else str(h) for h in header_row]
@@ -257,7 +281,7 @@ def parse_csv(path: str, max_cells: int | None = None) -> dict[str, Any]:
         max_cells = DEFAULT_MAX_CELLS
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = _csv.reader(f)
-        header_row = next(reader, None)
+        header_row = _header_row(reader)
         if header_row is None:
             raise ValueError("CSV has no header row")
         originals = [h.strip() for h in header_row]
@@ -267,7 +291,7 @@ def parse_csv(path: str, max_cells: int | None = None) -> dict[str, Any]:
 def _iter_rows_csv(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = _csv.reader(f)
-        next(reader, None)
+        _header_row(reader)
         for values in _csv_data_rows(reader, len(keys)):
             yield dict(zip(keys, values, strict=True))
 
@@ -276,7 +300,7 @@ def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
         rows = _xlsx_values(_data_sheet(wb))
-        next(rows, None)
+        _header_row(rows)
         for values in _xlsx_data_rows(rows, len(keys)):
             yield dict(zip(keys, values, strict=True))
     finally:

@@ -32,6 +32,9 @@
   (an `.xlsx` formatted wider than its data, a CSV with trailing commas).
   Nameless columns that hold data, and any before the last named header,
   are kept.
+- Completely blank rows above the header are skipped, in `.xlsx` and CSV,
+  by both `parse_*` and `iter_rows`. A title row with text in it is still
+  read as the header.
 
 ## 0.4.0
 

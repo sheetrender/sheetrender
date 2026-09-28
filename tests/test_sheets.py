@@ -269,3 +269,33 @@ def test_trailing_nameless_empty_columns_are_dropped(tmp_path):
     assert list(iter_rows(str(csv_path), csv_result["columns"])) == [
         {"name": "Ann", "amount": 1}, {"name": "Bob", "amount": 2},
     ]
+
+
+def test_blank_rows_above_the_header_are_skipped(tmp_path):
+    """A table that starts a few rows down took the empty first row as its
+    header: nameless columns, and the real header rendered as a document. A CSV
+    opening with blank lines came out with no columns at all."""
+    from openpyxl import Workbook
+
+    from sheetrender.sheets import iter_rows, parse_csv
+
+    path = tmp_path / "lower.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["B3"], sheet["C3"] = "Name", "Amount"
+    sheet["B4"], sheet["C4"] = "Ann", 5
+    sheet["B5"], sheet["C5"] = "Bob", 6
+    sheet["A2"] = "   "
+    workbook.save(path)
+
+    result = parse_xlsx(str(path))
+
+    assert [c["original"] for c in result["columns"]] == ["", "Name", "Amount"]
+    assert result["row_count"] == 2
+    assert [row["name"] for row in iter_rows(str(path), result["columns"])] == ["Ann", "Bob"]
+
+    csv_path = tmp_path / "lower.csv"
+    csv_path.write_text("\n,,\nName,Amount\nAnn,5\n")
+    csv_result = parse_csv(str(csv_path))
+    assert [c["key"] for c in csv_result["columns"]] == ["name", "amount"]
+    assert list(iter_rows(str(csv_path), csv_result["columns"])) == [{"name": "Ann", "amount": 5}]
