@@ -19,6 +19,11 @@
   `"2026/09/26 3:59:00 PM GMT+1"`; the zone is dropped), year-first slashes
   (`2026/09/26`) and English month names (`"September 26, 2026"`,
   `"26 Sep 2026"`, `"26-Sep-26"`). Ingest types such columns as dates.
+- `.xlsx` integers under a number format of zeros and literal dashes/spaces
+  (Excel's Zip Code `00000`, Zip+4 `00000-0000`, SSN `000-00-0000`, fixed
+  width IDs) are read as the text Excel displays (`"02134"`), not the stored
+  number. Reading now walks cells rather than bare values, about 20% slower
+  on a 1M-cell workbook.
 
 ## 0.4.0
 

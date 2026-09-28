@@ -80,6 +80,50 @@ def _json_row(keys: list[str], values: tuple[Any, ...]) -> dict[str, Any]:
     return {key: _json_cell(value) for key, value in zip(keys, values, strict=True)}
 
 
+# A number format made only of zeros and literal separators: Excel's "Zip Code"
+# (00000), "Zip Code + 4" (00000-0000), "Social Security Number" (000-00-0000)
+# and any fixed-width ID format. The cell stores 2134 and displays 02134.
+_ZERO_PAD_FORMAT_RE = re.compile(r"0+(?:[- ]0+)*")
+
+
+def _zero_padded(value: int, number_format: str) -> int | str:
+    """The text Excel shows for an integer under a zero-padding format.
+
+    openpyxl returns the stored number, so a Massachusetts ZIP code formatted
+    as Excel's "Zip Code" reached the document as 2134. Only whole
+    non-negative numbers under a format of zeros (optionally split by literal
+    dashes or spaces) are rewritten; anything else keeps its value.
+    """
+    fmt = number_format.replace("\\", "").replace('"', "")
+    if value < 0 or not _ZERO_PAD_FORMAT_RE.fullmatch(fmt) or fmt.count("0") < 2:
+        return value
+    groups = re.split(r"[- ]", fmt)
+    separators = re.findall(r"[- ]", fmt)
+    digits = str(value).zfill(fmt.count("0"))
+    # Digits beyond the format's width widen the first group, as Excel does.
+    sizes = [len(groups[0]) + len(digits) - fmt.count("0"), *(len(g) for g in groups[1:])]
+    parts, start = [], 0
+    for size in sizes:
+        parts.append(digits[start:start + size])
+        start += size
+    return parts[0] + "".join(sep + part for sep, part in zip(separators, parts[1:], strict=True))
+
+
+def _xlsx_value(cell: Any) -> Any:
+    value = cell.value
+    if type(value) is int:
+        number_format = getattr(cell, "number_format", None)
+        if number_format and number_format != "General":
+            return _zero_padded(value, number_format)
+    return value
+
+
+def _xlsx_values(ws: Any) -> Iterator[tuple[Any, ...]]:
+    """The sheet's rows as values, with zero-padded formats applied."""
+    for row in ws.iter_rows():
+        yield tuple(_xlsx_value(cell) for cell in row)
+
+
 def _xlsx_data_rows(rows: Iterable[Sequence[Any]], width: int) -> Iterator[tuple[Any, ...]]:
     for row in rows:
         values = _fit_row(row, width)
@@ -167,7 +211,7 @@ def parse_xlsx(path: str, max_cells: int | None = None) -> dict[str, Any]:
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
         ws = wb.worksheets[0]
-        rows = ws.iter_rows(values_only=True)
+        rows = _xlsx_values(ws)
         header_row = next(rows, None)
         if header_row is None:
             raise ValueError("Workbook has no header row")
@@ -200,7 +244,7 @@ def _iter_rows_csv(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
 def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        rows = wb.worksheets[0].iter_rows(values_only=True)
+        rows = _xlsx_values(wb.worksheets[0])
         next(rows, None)
         for values in _xlsx_data_rows(rows, len(keys)):
             yield dict(zip(keys, values, strict=True))

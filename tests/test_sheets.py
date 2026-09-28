@@ -172,3 +172,35 @@ def test_time_and_duration_cells_keep_sample_rows_json(tmp_path):
     row = next(iter_rows(str(path), result["columns"]))
     template = "{{ appointment_time }} {{ hours }}"
     assert render_row(template, row) == render_row(template, result["sample_rows"][0])
+
+
+def test_zero_padded_number_formats_keep_their_leading_zeros(tmp_path):
+    """Excel's "Zip Code" format stores 2134 and shows 02134; the document used
+    to print 2134. Formats of zeros and literal dashes are applied at read."""
+    from openpyxl import Workbook
+
+    from sheetrender.sheets import iter_rows
+
+    path = tmp_path / "addresses.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Name", "ZIP", "ZIP+4", "SSN", "Badge", "Count", "Price", "Wide"])
+    sheet.append(["Ann", 2134, 21340001, 12345678, 42, 7, 5, 1234567])
+    for cell, fmt in zip(
+        ("B2", "C2", "D2", "E2", "F2", "G2", "H2"),
+        ("00000", "00000\\-0000", "000\\-00\\-0000", "000000", "0", '"$"#,##0.00', "00000"),
+        strict=True,
+    ):
+        sheet[cell].number_format = fmt
+    workbook.save(path)
+
+    result = parse_xlsx(str(path))
+    row = next(iter_rows(str(path), result["columns"]))
+
+    assert row == {
+        "name": "Ann", "zip": "02134", "zip_4": "02134-0001", "ssn": "012-34-5678",
+        "badge": "000042", "count": 7, "price": 5, "wide": "1234567",
+    }
+    assert result["sample_rows"][0] == row
+    types = {c["key"]: c["inferred_type"] for c in result["columns"]}
+    assert types["zip"] == "string" and types["count"] == "number"
