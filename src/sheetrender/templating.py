@@ -236,13 +236,19 @@ def _parse_date_time_text(value: str, day_first: bool) -> datetime | None:
 
 
 def date_needs_confirmation(value) -> bool:
-    """Dotted or unpadded numeric strings need another date cell at ingest."""
+    """Dotted or unpadded numeric strings need another date cell at ingest.
+
+    Year-first forms too: 2024.1.2 and 2024.01.02 are also CalVer version
+    numbers, and 2024/1/2 is as unpadded as 1/2/2024.
+    """
     if not isinstance(value, str):
         return False
     value = value.strip()
     return bool(
         re.fullmatch(r"\d{1,2}\.\d{1,2}\.\d{4}", value)
+        or re.fullmatch(r"\d{4}\.\d{1,2}\.\d{1,2}", value)
         or re.fullmatch(r"(?:\d[/\-]\d{1,2}|\d{1,2}[/\-]\d)[/\-]\d{4}", value)
+        or re.fullmatch(r"\d{4}[/\-](?:\d[/\-]\d{1,2}|\d{1,2}[/\-]\d)", value)
     )
 
 

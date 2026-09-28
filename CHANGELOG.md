@@ -33,6 +33,9 @@
   `"2026/09/26 3:59:00 PM GMT+1"`; the zone is dropped), year-first slashes
   (`2026/09/26`) and English month names (`"September 26, 2026"`,
   `"26 Sep 2026"`, `"26-Sep-26"`). Ingest types such columns as dates.
+  Year-first dotted or unpadded values (`2024.1.2`, `2024.01.02`,
+  `2024/1/2`) are also CalVer version numbers, so like `1.2.2024` they type
+  a column as dates only once a second cell confirms it.
 - `.xlsx` columns of ZIP codes and IDs keep their leading zeros. A column
   is read as the text Excel displays (`"02134"`, `"02134-0001"`,
   `"012-34-5678"`) when its integers use a format of 3 to 20 zero

@@ -2,6 +2,8 @@ import csv
 import os
 import tempfile
 
+import pytest
+
 from sheetrender.sheets import iter_rows, parse_csv
 
 
@@ -88,3 +90,25 @@ def test_sample_rows_numeric():
         assert result["sample_rows"][0]["salary"] == 42000
     finally:
         os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    ("first", "later", "expected"),
+    [
+        # Year-first dotted and unpadded forms are also CalVer version numbers
+        # (2024.1.2): one date-looking cell must not type the column.
+        ("2024.1.2", "2.0.1", "string"),
+        ("2024.01.02", "2.0.1", "string"),
+        ("2024/1/2", "n/a", "string"),
+        ("2024-1-2", "v2", "string"),
+        ("2024.1.2", "2024.2.3", "date"),
+        # Padded slashes and ISO dates are dates on sight, as before.
+        ("2024/01/02", "2.0.1", "date"),
+        ("2024-01-02", "2.0.1", "date"),
+    ],
+)
+def test_year_first_version_numbers_need_a_second_date(tmp_path, first, later, expected):
+    path = tmp_path / "versions.csv"
+    path.write_text(f"Release\n{first}\n{later}\n")
+    result = parse_csv(str(path))
+    assert result["columns"][0]["inferred_type"] == expected
