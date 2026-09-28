@@ -296,11 +296,36 @@ def _iter_rows_csv(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
             yield dict(zip(keys, values, strict=True))
 
 
-def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
+def _stored_sheet_rows(wb: Any, originals: list[Any]) -> Iterator[tuple[Any, ...]]:
+    """Rows after the header of the sheet the stored columns were parsed from.
+
+    Columns are positional, so rendering must read the same sheet that parsing
+    did. Versions before 0.5 always parsed the first sheet, hidden or not;
+    columns stored from such a workbook name the hidden sheet's headers, and
+    reading the visible sheet under them would put one sheet's data under the
+    other's names. So the sheet whose header matches the stored names wins,
+    checking the one parse_xlsx picks today first (the only one read in the
+    usual case), and that sheet is the fallback when nothing matches.
+    """
+    preferred = _data_sheet(wb)
+    if all(isinstance(original, str) for original in originals):
+        for ws in (preferred, *(ws for ws in wb.worksheets if ws is not preferred)):
+            rows = _xlsx_values(ws)
+            header = _header_row(rows) or ()
+            names = ["" if h is None else str(h) for h in header]
+            names += [""] * (len(originals) - len(names))
+            if names[: len(originals)] == originals:
+                return rows
+    rows = _xlsx_values(preferred)
+    _header_row(rows)
+    return rows
+
+
+def _iter_rows_xlsx(path: str, columns: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    keys = [c["key"] for c in columns]
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        rows = _xlsx_values(_data_sheet(wb))
-        _header_row(rows)
+        rows = _stored_sheet_rows(wb, [c.get("original") for c in columns])
         for values in _xlsx_data_rows(rows, len(keys)):
             yield dict(zip(keys, values, strict=True))
     finally:
@@ -309,7 +334,6 @@ def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
 
 def iter_rows(path: str, columns: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
     """Yield each non-empty data row as a dict keyed by the columns' template keys."""
-    keys = [c["key"] for c in columns]
     if path.lower().endswith(".csv"):
-        return _iter_rows_csv(path, keys)
-    return _iter_rows_xlsx(path, keys)
+        return _iter_rows_csv(path, [c["key"] for c in columns])
+    return _iter_rows_xlsx(path, columns)

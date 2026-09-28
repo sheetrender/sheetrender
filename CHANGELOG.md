@@ -25,16 +25,18 @@
   number. Reading now walks cells rather than bare values, about 20% slower
   on a 1M-cell workbook.
 - `.xlsx` reading skips hidden sheets: the first visible sheet is the data
-  (the first sheet only if all are hidden). A caller that stored columns
-  parsed by an older version from a workbook whose first sheet is hidden
-  should re-parse it, since `iter_rows` now reads the visible sheet.
+  (the first sheet only if all are hidden). `iter_rows` reads the sheet whose
+  header matches the stored columns' `original` names, so columns stored by
+  an older version from a hidden first sheet keep reading that sheet.
 - Columns after the last named header that no data row fills are dropped
   (an `.xlsx` formatted wider than its data, a CSV with trailing commas).
   Nameless columns that hold data, and any before the last named header,
   are kept.
 - Completely blank rows above the header are skipped, in `.xlsx` and CSV,
   by both `parse_*` and `iter_rows`. A title row with text in it is still
-  read as the header.
+  read as the header. Columns stored by an older version from such a file
+  (all nameless) now render one row fewer: the real header row is no longer
+  yielded as data.
 
 ## 0.4.0
 

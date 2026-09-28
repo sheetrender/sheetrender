@@ -299,3 +299,32 @@ def test_blank_rows_above_the_header_are_skipped(tmp_path):
     csv_result = parse_csv(str(csv_path))
     assert [c["key"] for c in csv_result["columns"]] == ["name", "amount"]
     assert list(iter_rows(str(csv_path), csv_result["columns"])) == [{"name": "Ann", "amount": 5}]
+
+
+def test_columns_stored_from_a_hidden_first_sheet_still_read_that_sheet(tmp_path):
+    """Before 0.5 the first sheet was parsed even when hidden. Rendering such a
+    stored dataset must keep reading the sheet its columns came from, not
+    switch to the visible one under the hidden sheet's column names."""
+    from openpyxl import Workbook
+
+    from sheetrender.sheets import iter_rows
+
+    path = tmp_path / "hidden.xlsx"
+    workbook = Workbook()
+    lookup = workbook.active
+    lookup.title = "Lookup"
+    lookup.append(["code", "label"])
+    lookup.append([1, "one"])
+    lookup.sheet_state = "hidden"
+    customers = workbook.create_sheet("Customers")
+    customers.append(["Name", "City"])
+    customers.append(["Ann", "Oslo"])
+    workbook.save(path)
+    old_columns = [
+        {"original": "code", "key": "code", "inferred_type": "number"},
+        {"original": "label", "key": "label", "inferred_type": "string"},
+    ]
+
+    assert list(iter_rows(str(path), old_columns)) == [{"code": 1, "label": "one"}]
+    # Columns without originals (a hand-built list) fall back to the visible sheet.
+    assert list(iter_rows(str(path), [{"key": "a"}, {"key": "b"}])) == [{"a": "Ann", "b": "Oslo"}]
