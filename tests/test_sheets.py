@@ -204,3 +204,33 @@ def test_zero_padded_number_formats_keep_their_leading_zeros(tmp_path):
     assert result["sample_rows"][0] == row
     types = {c["key"]: c["inferred_type"] for c in result["columns"]}
     assert types["zip"] == "string" and types["count"] == "number"
+
+
+def test_a_hidden_first_sheet_is_skipped_for_the_first_visible_one(tmp_path):
+    """A workbook whose first tab is a hidden lookup table imported that table:
+    the user saw their customer list in Excel and got two rows of codes."""
+    from openpyxl import Workbook
+
+    from sheetrender.sheets import iter_rows
+
+    path = tmp_path / "hidden.xlsx"
+    workbook = Workbook()
+    lookup = workbook.active
+    lookup.title = "Lookup"
+    lookup.append(["code", "label"])
+    lookup.append([1, "one"])
+    lookup.sheet_state = "hidden"
+    customers = workbook.create_sheet("Customers")
+    customers.append(["Name", "City"])
+    customers.append(["Ann", "Oslo"])
+    customers.append(["Bob", "Rome"])
+    workbook.active = 1
+    workbook.save(path)
+
+    result = parse_xlsx(str(path))
+
+    assert result["sheet_name"] == "Customers"
+    assert [c["key"] for c in result["columns"]] == ["name", "city"]
+    assert list(iter_rows(str(path), result["columns"])) == [
+        {"name": "Ann", "city": "Oslo"}, {"name": "Bob", "city": "Rome"},
+    ]

@@ -24,6 +24,10 @@
   width IDs) are read as the text Excel displays (`"02134"`), not the stored
   number. Reading now walks cells rather than bare values, about 20% slower
   on a 1M-cell workbook.
+- `.xlsx` reading skips hidden sheets: the first visible sheet is the data
+  (the first sheet only if all are hidden). A caller that stored columns
+  parsed by an older version from a workbook whose first sheet is hidden
+  should re-parse it, since `iter_rows` now reads the visible sheet.
 
 ## 0.4.0
 

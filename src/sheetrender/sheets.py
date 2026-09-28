@@ -124,6 +124,19 @@ def _xlsx_values(ws: Any) -> Iterator[tuple[Any, ...]]:
         yield tuple(_xlsx_value(cell) for cell in row)
 
 
+def _data_sheet(wb: Any) -> Any:
+    """The first sheet the workbook's owner can see.
+
+    A hidden sheet (a lookup table, a macro's scratch space) is never the data
+    the user means, and they cannot see what was imported from it. Only when
+    every sheet is hidden does the first one stand in.
+    """
+    for ws in wb.worksheets:
+        if getattr(ws, "sheet_state", "visible") == "visible":
+            return ws
+    return wb.worksheets[0]
+
+
 def _xlsx_data_rows(rows: Iterable[Sequence[Any]], width: int) -> Iterator[tuple[Any, ...]]:
     for row in rows:
         values = _fit_row(row, width)
@@ -210,7 +223,7 @@ def parse_xlsx(path: str, max_cells: int | None = None) -> dict[str, Any]:
         max_cells = DEFAULT_MAX_CELLS
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        ws = wb.worksheets[0]
+        ws = _data_sheet(wb)
         rows = _xlsx_values(ws)
         header_row = next(rows, None)
         if header_row is None:
@@ -244,7 +257,7 @@ def _iter_rows_csv(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
 def _iter_rows_xlsx(path: str, keys: list[str]) -> Iterator[dict[str, Any]]:
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        rows = _xlsx_values(wb.worksheets[0])
+        rows = _xlsx_values(_data_sheet(wb))
         next(rows, None)
         for values in _xlsx_data_rows(rows, len(keys)):
             yield dict(zip(keys, values, strict=True))
