@@ -169,22 +169,70 @@ def parse_date(value, *, excel_serial: bool = True, day_first: bool = False) -> 
     value = value.strip()
     if value.isdecimal():
         return None
+    parsed = _parse_date_text(value, day_first) or _parse_date_time_text(value, day_first)
+    if parsed is None:
+        return None
+    return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
+
+
+# English month names, as Google Sheets' date formats and Excel's d-mmm-yy
+# write them. A month name cannot be a version number or an ID, so these need
+# no second cell at ingest.
+_MONTH_NAME_FORMATS = (
+    "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y",
+    "%d %B %Y", "%d %b %Y", "%d %B, %Y", "%d %b, %Y",
+    "%A, %B %d, %Y", "%a, %b %d, %Y", "%A, %d %B %Y", "%a, %d %b %Y",
+    "%d-%b-%Y", "%d-%b-%y", "%b-%d-%Y",
+)
+# A clock time after the date, as a Sheets import ("9/26/2026 15:59:00"), a
+# Google Forms export ("2026/09/26 3:59:00 PM GMT+1") or Excel's CSV writes it.
+# The zone is dropped: the displayed local time is the one the sheet shows.
+_TRAILING_TIME_RE = re.compile(
+    r"(?P<date>.+?)(?:[ T]+|,\s*)(?P<hour>\d{1,2}):(?P<minute>\d{2})"
+    r"(?::(?P<second>\d{2})(?:\.\d+)?)?\s*(?P<ampm>[AaPp]\.?[Mm]\.?)?"
+    r"(?:\s*(?:GMT|UTC|Z)(?:[+-]\d{1,2}(?::?\d{2})?)?)?"
+)
+
+
+def _parse_date_text(value: str, day_first: bool) -> datetime | None:
     try:
-        parsed = datetime.fromisoformat(value)
-        return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
+        return datetime.fromisoformat(value)
     except ValueError:
         pass
     orders = ("%m{sep}%d{sep}%Y", "%d{sep}%m{sep}%Y")
     if day_first:
         orders = orders[::-1]
     for separator in ("/", ".", "-"):
-        for order in orders:
+        # Year first is unambiguous: 2026/09/26.
+        for order in (*orders, "%Y{sep}%m{sep}%d"):
             try:
-                parsed = datetime.strptime(value, order.format(sep=separator))
-                return parsed if excel_serial or 1900 <= parsed.year <= 2100 else None
+                return datetime.strptime(value, order.format(sep=separator))
             except ValueError:
                 pass
+    for fmt in _MONTH_NAME_FORMATS:
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
     return None
+
+
+def _parse_date_time_text(value: str, day_first: bool) -> datetime | None:
+    match = _TRAILING_TIME_RE.fullmatch(value)
+    if match is None:
+        return None
+    day = _parse_date_text(match["date"].strip(), day_first)
+    if day is None:
+        return None
+    hour, minute = int(match["hour"]), int(match["minute"])
+    second = int(match["second"] or 0)
+    if match["ampm"]:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if match["ampm"][0] in "Pp" else 0)
+    if hour > 23 or minute > 59 or second > 59:
+        return None
+    return day.replace(hour=hour, minute=minute, second=second)
 
 
 def date_needs_confirmation(value) -> bool:

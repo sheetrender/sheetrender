@@ -243,3 +243,42 @@ def test_sumcol_reads_decimal_commas_instead_of_dropping_them():
     # "1.234,50" used to lose its comma and total as 1.2345.
     items = [{"a": "1.234,50"}, {"a": "99,90"}, {"a": "$1,000.00"}, {"a": "(0.40)"}]
     assert sumcol(items, "a") == 2334.0
+
+
+@pytest.mark.parametrize("value", [
+    # Google Sheets import (FORMATTED_STRING) and Sheets' own date-time format.
+    "9/22/2026 15:59:00", "9/22/2026 3:59 PM", "09/22/2026 15:59",
+    # Google Forms "Timestamp" column as its CSV download writes it.
+    "2026/09/22 3:59:00 PM GMT+1", "2026/09/22 15:59:00",
+    "22.09.2026 15:59", "2026-09-22T15:59:00Z",
+])
+def test_date_reads_a_timestamp_with_its_clock_time(value):
+    """A Forms/Sheets timestamp used to format as empty text, so a certificate
+    template's `timestamp | date(...)` left every award date blank."""
+    assert format_date(value) == "Sep 22, 2026"
+    assert format_date(value, "%H:%M") == "15:59"
+
+
+@pytest.mark.parametrize("value", [
+    "September 22, 2026", "Sep 22, 2026", "22 September 2026", "22 Sep 2026",
+    "Tuesday, September 22, 2026", "22-Sep-2026", "22-Sep-26", "2026/09/22",
+])
+def test_date_reads_month_names_and_year_first_slashes(value):
+    assert format_date(value, "%Y-%m-%d") == "2026-09-22"
+
+
+@pytest.mark.parametrize("value", [
+    "9/22/2026 25:00", "9/22/2026 13:00 PM", "9/22/2026 12:61", "Meeting 10:30",
+    "Septembre 22, 2026", "Sep 2026", "2026/22/09",
+])
+def test_date_still_rejects_broken_timestamps(value):
+    assert format_date(value) == ""
+
+
+def test_ingest_types_a_sheets_timestamp_column_as_a_date(tmp_path):
+    from sheetrender.sheets import parse_csv
+
+    path = tmp_path / "responses.csv"
+    path.write_text("Timestamp,Name\n9/22/2026 15:59:00,Ann\n9/23/2026 9:01:10,Bob\n")
+    types = [c["inferred_type"] for c in parse_csv(str(path))["columns"]]
+    assert types == ["date", "string"]
