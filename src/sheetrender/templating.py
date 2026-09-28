@@ -189,7 +189,7 @@ _MONTH_NAME_FORMATS = (
 # The zone is dropped: the displayed local time is the one the sheet shows.
 _TRAILING_TIME_RE = re.compile(
     r"(?P<date>.+?)(?:[ T]+|,\s*)(?P<hour>\d{1,2}):(?P<minute>\d{2})"
-    r"(?::(?P<second>\d{2})(?:\.\d+)?)?\s*(?P<ampm>[AaPp]\.?[Mm]\.?)?"
+    r"(?::(?P<second>\d{2})(?:\.(?P<fraction>\d+))?)?\s*(?P<ampm>[AaPp]\.?[Mm]\.?)?"
     r"(?:\s*(?:GMT|UTC|Z)(?:[+-]\d{1,2}(?::?\d{2})?)?)?"
 )
 
@@ -232,7 +232,9 @@ def _parse_date_time_text(value: str, day_first: bool) -> datetime | None:
         hour = hour % 12 + (12 if match["ampm"][0] in "Pp" else 0)
     if hour > 23 or minute > 59 or second > 59:
         return None
-    return day.replace(hour=hour, minute=minute, second=second)
+    # Microseconds hold six digits; a seventh and beyond are dropped.
+    microsecond = int((match["fraction"] or "0")[:6].ljust(6, "0"))
+    return day.replace(hour=hour, minute=minute, second=second, microsecond=microsecond)
 
 
 def date_needs_confirmation(value) -> bool:

@@ -30,7 +30,8 @@
 - `render_filename` turns a line break or tab inside a value into a space
   (`"John\nSmith"` gives `John Smith.pdf`, not `JohnSmith.pdf`).
 - `parse_date`/`date` read a clock time after a date (`"9/26/2026 15:59:00"`,
-  `"2026/09/26 3:59:00 PM GMT+1"`; the zone is dropped), year-first slashes
+  `"2026/09/26 3:59:00 PM GMT+1"`; the zone is dropped, fractional seconds
+  are kept to the microsecond), year-first slashes
   (`2026/09/26`) and English month names (`"September 26, 2026"`,
   `"26 Sep 2026"`, `"26-Sep-26"`). Ingest types such columns as dates.
   Year-first dotted or unpadded values (`2024.1.2`, `2024.01.02`,

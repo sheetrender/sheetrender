@@ -385,3 +385,17 @@ def test_number_table_changes_only_the_deliberate_forms():
     for row in NUMBER_TABLE:
         if row not in deliberate:
             assert _same_number(row[1], row[2]), row
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("9/26/2026 14:03:11.123456", "14:03:11.123456"),
+        ("9/26/2026 14:03:11.5", "14:03:11.500000"),
+        ("2026/09/26 2:03:11.25 PM", "14:03:11.250000"),
+        ("9/26/2026 14:03:11.1234567", "14:03:11.123456"),
+        ("9/26/2026 14:03:11", "14:03:11.000000"),
+    ],
+)
+def test_date_keeps_fractional_seconds(value, expected):
+    assert format_date(value, "%H:%M:%S.%f") == expected
