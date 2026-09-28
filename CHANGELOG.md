@@ -13,6 +13,8 @@
 - `parse_xlsx` sample rows hold time-of-day cells as `"09:30:00"` and
   duration cells as `"1:30:00"` (what a template prints for the native
   value) instead of `time`/`timedelta` objects that JSON cannot encode.
+- `render_filename` turns a line break or tab inside a value into a space
+  (`"John\nSmith"` gives `John Smith.pdf`, not `JohnSmith.pdf`).
 
 ## 0.4.0
 

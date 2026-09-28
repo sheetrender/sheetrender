@@ -18,7 +18,7 @@ def test_render_filename_missing_column_falls_back():
 
 
 def test_render_filename_sanitizes_separators_reserved_chars_and_whitespace():
-    assert render_filename('  ACME/West\\Q1<>:"|?*\nReport  ', {}, 0) == "ACMEWestQ1Report.pdf"
+    assert render_filename('  ACME/West\\Q1<>:"|?*\nReport  ', {}, 0) == "ACMEWestQ1 Report.pdf"
 
 
 def test_render_filename_does_not_html_escape_values():
@@ -46,3 +46,11 @@ def test_dedupe_filenames_preserves_order_and_appends_suffixes():
         "Other.pdf",
         "Invoice (3).pdf",
     ]
+
+
+def test_render_filename_keeps_words_from_a_multiline_cell_apart():
+    """A name typed on two lines in one cell (Alt+Enter) used to lose the
+    space: "John\\nSmith" became "JohnSmith.pdf"."""
+    row = {"name": "John\nSmith", "company": "Acme\tCorp\r\nLtd"}
+    assert render_filename("{{ name }}", row, 0) == "John Smith.pdf"
+    assert render_filename("{{ company }}", row, 0) == "Acme Corp Ltd.pdf"

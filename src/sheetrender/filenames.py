@@ -57,7 +57,9 @@ def render_filename(
 
 
 def _sanitize_filename(rendered: str, fallback: str) -> str:
-    sanitized = _INVALID_CHARS_RE.sub("", rendered)
+    # Whitespace first: \t and \n are also control characters, and stripping
+    # them before collapsing glued a two-line cell into one word.
+    sanitized = _INVALID_CHARS_RE.sub("", _WHITESPACE_RE.sub(" ", rendered))
     sanitized = _WHITESPACE_RE.sub(" ", sanitized).strip(" .")
     if not sanitized:
         return fallback
