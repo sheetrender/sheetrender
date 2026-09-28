@@ -280,6 +280,10 @@ def qr(value, size=128) -> str:
         return ""
 
 
+# What 0.4.0's sumcol stripped before trying Decimal.
+_SUMCOL_0_4_NOISE = str.maketrans("", "", "$€£, \t\r\n\u00a0\u202f")
+
+
 def sumcol(items, key):
     if not isinstance(items, list):
         return 0.0
@@ -290,13 +294,22 @@ def sumcol(items, key):
         value = item.get(key)
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
+        negative = False
         if isinstance(value, str):
-            value = _number_text(value) or value.strip()
+            text = _number_text(value)
+            if text is None:
+                # 0.4.0's reading, kept for what the stricter parser declines:
+                # "$1e3", "(12.)" and "1,234." totalled then, and a silent
+                # zero in an invoice total is worse than a lenient read.
+                text = value.strip().translate(_SUMCOL_0_4_NOISE)
+                if len(text) > 1 and text.startswith("(") and text.endswith(")"):
+                    negative, text = True, text[1:-1]
+            value = text
         try:
             parsed = Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError):
             continue
-        total += parsed
+        total += -parsed if negative else parsed
     return float(total)
 
 

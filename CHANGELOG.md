@@ -21,7 +21,9 @@
   written the way a spreadsheet displays them: `"$1,234.50"`, `"(45.00)"`,
   `"1.234,50 €"`, `"99,90"`, `"1,23,456"`, and `pct` also `"89%"`. They used
   to return empty text for these. `sumcol` shares the parser, so `"1.234,50"`
-  now totals as 1234.5 instead of 1.2345.
+  now totals as 1234.5 instead of 1.2345 (likewise `"1 234,50"`, `"12,5"`,
+  `"1.234.567"` and `"¥3"`). Anything the new parser declines is still
+  totalled the way 0.4.0 did (`"$1e3"`, `"(12.)"`, `"1,234."`), never as 0.
 - `parse_xlsx` sample rows hold time-of-day cells as `"09:30:00"` and
   duration cells as `"1:30:00"` (what a template prints for the native
   value) instead of `time`/`timedelta` objects that JSON cannot encode.

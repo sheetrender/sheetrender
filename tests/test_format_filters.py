@@ -282,3 +282,106 @@ def test_ingest_types_a_sheets_timestamp_column_as_a_date(tmp_path):
     path.write_text("Timestamp,Name\n9/22/2026 15:59:00,Ann\n9/23/2026 9:01:10,Bob\n")
     types = [c["inferred_type"] for c in parse_csv(str(path))["columns"]]
     assert types == ["date", "string"]
+
+
+# (input, sumcol under 0.4.0, sumcol now, money2 under 0.4.0, money2 now).
+# The 0.4.0 columns were produced by the released wheel. sumcol keeps every
+# total 0.4.0 gave, except the forms marked below, where 0.4.0 read a decimal
+# comma or dot grouping as something else (1.234,5 as 1.2345) or skipped a
+# currency symbol it did not know (¥). money2 (all the number filters share
+# its parser) only ever gains a value where 0.4.0 printed nothing.
+_NAN, _INF = float("nan"), float("inf")
+NUMBER_TABLE = [
+    ("$1e3", 1000.0, 1000.0, "", ""),
+    ("(1e3)", -1000.0, -1000.0, "", ""),
+    ("$12.", 12.0, 12.0, "", ""),
+    ("(12.)", -12.0, -12.0, "", ""),
+    ("$1.5E3", 1500.0, 1500.0, "", ""),
+    ("1,234.", 1234.0, 1234.0, "", ""),
+    ("$1,234.", 1234.0, 1234.0, "", ""),
+    ("(1,234.50)", -1234.5, -1234.5, "", "-$1,234.50"),
+    ("1,2,3", 123.0, 123.0, "", ""),
+    ("$nan", _NAN, _NAN, "", ""),
+    ("$1e400", _INF, _INF, "", ""),
+    ("12.", 12.0, 12.0, "$12.00", "$12.00"),
+    ("1e3", 1000.0, 1000.0, "$1,000.00", "$1,000.00"),
+    ("-1e3", -1000.0, -1000.0, "-$1,000.00", "-$1,000.00"),
+    ("$-5", -5.0, -5.0, "", "-$5.00"),
+    ("-$5", -5.0, -5.0, "", "-$5.00"),
+    ("$ 5", 5.0, 5.0, "", "$5.00"),
+    ("( 5 )", -5.0, -5.0, "", "-$5.00"),
+    ("(5)", -5.0, -5.0, "", "-$5.00"),
+    ("(-5)", 5.0, 5.0, "", "$5.00"),
+    ("()", 0.0, 0.0, "", ""),
+    ("--5", 0.0, 0.0, "", ""),
+    ("+5", 5.0, 5.0, "$5.00", "$5.00"),
+    ("$+5", 5.0, 5.0, "", "$5.00"),
+    ("1,234", 1234.0, 1234.0, "", "$1,234.00"),
+    ("1,234.5", 1234.5, 1234.5, "", "$1,234.50"),
+    ("$1,234.50", 1234.5, 1234.5, "", "$1,234.50"),
+    ("12,345,678", 12345678.0, 12345678.0, "", "$12,345,678.00"),
+    ("12,34,567", 1234567.0, 1234567.0, "", "$1,234,567.00"),
+    ("nan", _NAN, _NAN, "", ""),
+    ("inf", _INF, _INF, "", ""),
+    ("1e400", _INF, _INF, "", ""),
+    ("-0", 0.0, 0.0, "$0.00", "$0.00"),
+    ("0x10", 0.0, 0.0, "", ""),
+    ("1_000", 1000.0, 1000.0, "$1,000.00", "$1,000.00"),
+    ("١٢٣", 123.0, 123.0, "$123.00", "$123.00"),
+    ("12.5%", 0.0, 0.0, "", ""),
+    ("$.5", 0.5, 0.5, "", "$0.50"),
+    (".5", 0.5, 0.5, "$0.50", "$0.50"),
+    ("5.", 5.0, 5.0, "$5.00", "$5.00"),
+    ("1..2", 0.0, 0.0, "", ""),
+    ("$", 0.0, 0.0, "", ""),
+    ("-", 0.0, 0.0, "", ""),
+    ("( )", 0.0, 0.0, "", ""),
+    ("1.234", 1.234, 1.234, "$1.23", "$1.23"),
+    ("0.1", 0.1, 0.1, "$0.10", "$0.10"),
+    ("  7  ", 7.0, 7.0, "$7.00", "$7.00"),
+    ("£3", 3.0, 3.0, "", "$3.00"),
+    ("3€", 3.0, 3.0, "", "$3.00"),
+    ("3 €", 3.0, 3.0, "", "$3.00"),
+    ("$3.00-", 0.0, 0.0, "", ""),
+    ("1.5e-3", 0.0015, 0.0015, "$0.00", "$0.00"),
+    ("∞", 0.0, 0.0, "", ""),
+    ("TRUE", 0.0, 0.0, "", ""),
+    (True, 0.0, 0.0, "$1.00", "$1.00"),
+    (None, 0.0, 0.0, "", ""),
+    ("", 0.0, 0.0, "", ""),
+    (5, 5.0, 5.0, "$5.00", "$5.00"),
+    (-2, -2.0, -2.0, "-$2.00", "-$2.00"),
+    # Deliberate changes: a decimal comma or dot grouping, and ¥.
+    ("1.234,5", 1.2345, 1234.5, "", "$1,234.50"),
+    ("€1.234,50", 1.2345, 1234.5, "", "$1,234.50"),
+    ("1 234,50", 123450.0, 1234.5, "", "$1,234.50"),
+    ("1,23", 123.0, 1.23, "", "$1.23"),
+    ("12,5", 125.0, 12.5, "", "$12.50"),
+    ("1.234.567", 0.0, 1234567.0, "", "$1,234,567.00"),
+    ("¥3", 0.0, 3.0, "", "$3.00"),
+]
+
+
+def _same_number(a, b):
+    return (a != a and b != b) or a == b
+
+
+@pytest.mark.parametrize(("value", "old_sum", "new_sum", "old_money", "new_money"), NUMBER_TABLE)
+def test_number_parsing_against_0_4_0(value, old_sum, new_sum, old_money, new_money):
+    """"$1e3", "(1e3)", "$12." and "(12.)" totalled under 0.4.0's
+    strip-then-Decimal reading and fell to 0 under the stricter parser: a
+    silent zero in an invoice total. sumcol falls back to 0.4.0's reading
+    wherever the new parser declines."""
+    from sheetrender.templating import sumcol
+
+    assert _same_number(sumcol([{"a": value}], "a"), new_sum)
+    assert money2(value) == new_money
+    if old_money:
+        assert new_money == old_money
+
+
+def test_number_table_changes_only_the_deliberate_forms():
+    deliberate = NUMBER_TABLE[NUMBER_TABLE.index(("1.234,5", 1.2345, 1234.5, "", "$1,234.50")):]
+    for row in NUMBER_TABLE:
+        if row not in deliberate:
+            assert _same_number(row[1], row[2]), row
