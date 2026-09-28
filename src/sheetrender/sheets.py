@@ -177,9 +177,20 @@ def _summarize(
     watched: set[int] = set()
     sample_rows: list[dict[str, Any]] = []
     row_count = 0
+    # Columns past the last named header survive only if some row fills them:
+    # an .xlsx formatted a few columns wider than its data, or a CSV with
+    # trailing commas, otherwise arrives with a run of nameless empty columns.
+    named = [index for index, original in enumerate(originals) if original.strip()]
+    width = len(originals)
+    tail_start = named[-1] + 1 if named else width
+    used_tail = tail_start
     for values in data_rows:
         row_count += 1
         populated_cells += sum(1 for v in values if v is not None)
+        for index in range(width - 1, used_tail - 1, -1):
+            if values[index] is not None:
+                used_tail = index + 1
+                break
         if populated_cells > max_cells:
             raise TooManyCellsError(_too_many_cells_message(max_cells))
         if row_count <= 5000:
@@ -206,6 +217,13 @@ def _summarize(
         if len(sample_rows) < _SAMPLE_ROW_COUNT:
             sample_rows.append(_json_row(keys, values))
 
+    if used_tail < width:
+        # iter_rows fits rows to the stored columns, so dropping them here is
+        # enough for the render pass to ignore them too.
+        originals, keys, inferred_types = (
+            originals[:used_tail], keys[:used_tail], inferred_types[:used_tail]
+        )
+        sample_rows = [dict(list(row.items())[:used_tail]) for row in sample_rows]
     columns = [
         {"original": original, "key": key, "inferred_type": inferred_type}
         for original, key, inferred_type in zip(originals, keys, inferred_types, strict=True)

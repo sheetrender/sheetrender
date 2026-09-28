@@ -28,6 +28,10 @@
   (the first sheet only if all are hidden). A caller that stored columns
   parsed by an older version from a workbook whose first sheet is hidden
   should re-parse it, since `iter_rows` now reads the visible sheet.
+- Columns after the last named header that no data row fills are dropped
+  (an `.xlsx` formatted wider than its data, a CSV with trailing commas).
+  Nameless columns that hold data, and any before the last named header,
+  are kept.
 
 ## 0.4.0
 

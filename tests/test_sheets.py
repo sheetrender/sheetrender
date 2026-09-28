@@ -234,3 +234,38 @@ def test_a_hidden_first_sheet_is_skipped_for_the_first_visible_one(tmp_path):
     assert list(iter_rows(str(path), result["columns"])) == [
         {"name": "Ann", "city": "Oslo"}, {"name": "Bob", "city": "Rome"},
     ]
+
+
+def test_trailing_nameless_empty_columns_are_dropped(tmp_path):
+    """Formatting a few columns past the data (or a CSV's trailing commas) used
+    to add nameless empty columns (col_, col__2, ...) to the mapping."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    from sheetrender.sheets import iter_rows, parse_csv
+
+    path = tmp_path / "wide.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Name", None, "Email", None, None, None])
+    sheet.append(["Ann", "kept: middle", "ann@example.com", None, "kept: data", None])
+    sheet.append(["Bob", None, "bob@example.com"])
+    for column in "FGH":
+        sheet[f"{column}1"].font = Font(bold=True)
+    workbook.save(path)
+
+    result = parse_xlsx(str(path))
+
+    assert [c["key"] for c in result["columns"]] == ["name", "col_", "email", "col__2", "col__3"]
+    assert result["sample_rows"][1] == {
+        "name": "Bob", "col_": None, "email": "bob@example.com", "col__2": None, "col__3": None,
+    }
+    assert list(iter_rows(str(path), result["columns"]))[0]["col__3"] == "kept: data"
+
+    csv_path = tmp_path / "trailing.csv"
+    csv_path.write_text("Name,Amount,,\r\nAnn,1,,\r\nBob,2,,\r\n")
+    csv_result = parse_csv(str(csv_path))
+    assert [c["key"] for c in csv_result["columns"]] == ["name", "amount"]
+    assert list(iter_rows(str(csv_path), csv_result["columns"])) == [
+        {"name": "Ann", "amount": 1}, {"name": "Bob", "amount": 2},
+    ]
