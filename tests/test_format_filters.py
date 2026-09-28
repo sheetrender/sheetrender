@@ -200,3 +200,46 @@ def test_cli_day_first_flag_reaches_filenames():
     units = [(0, {"d": "03/04/2026"})]
     assert _batch_filenames(units, "{{ d|date('%Y-%m-%d') }}", False) == ["2026-03-04.pdf"]
     assert _batch_filenames(units, "{{ d|date('%Y-%m-%d') }}", False, day_first=True) == ["2026-04-03.pdf"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("$1,234.50", "$1,234.50"),
+        ("1,234.5", "$1,234.50"),
+        ("(45.00)", "-$45.00"),
+        ("-$1,234.50", "-$1,234.50"),
+        ("$ 12", "$12.00"),
+        ("1.234,50 €", "$1,234.50"),
+        ("99,90", "$99.90"),
+        ("1,23,456.00", "$123,456.00"),
+        ("12.50", "$12.50"),
+    ],
+)
+def test_number_filters_read_numbers_as_a_csv_export_writes_them(value, expected):
+    """Excel and Google Sheets CSV exports write the displayed text, so a
+    currency column arrives as "$1,234.50" — which money2 used to print as
+    nothing at all, leaving the amount blank on every document."""
+    env = get_env()
+    assert env.filters["money2"](value) == expected
+    assert env.filters["comma2"](value) == expected.replace("$", "")
+
+
+@pytest.mark.parametrize("value", ["1,2,3", "12.5%", "USD", "1.2.3,4,5", "$", "()", "1,234,56"])
+def test_number_filters_leave_text_that_is_not_a_number_blank(value):
+    assert get_env().filters["money2"](value) == ""
+
+
+def test_pct_and_comma_accept_displayed_text():
+    env = get_env()
+    assert env.filters["pct"]("89%") == "89%"
+    assert env.filters["pct"](" 89 % ") == "89%"
+    assert env.filters["comma"]("12,000") == "12,000"
+    assert env.filters["money_k"]("$1,250,000") == "$1.2M"
+
+
+def test_sumcol_reads_decimal_commas_instead_of_dropping_them():
+    sumcol = get_env().filters["sumcol"]
+    # "1.234,50" used to lose its comma and total as 1.2345.
+    items = [{"a": "1.234,50"}, {"a": "99,90"}, {"a": "$1,000.00"}, {"a": "(0.40)"}]
+    assert sumcol(items, "a") == 2334.0

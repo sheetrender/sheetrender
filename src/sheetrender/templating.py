@@ -49,12 +49,56 @@ _BRACE_FIELD_RE = re.compile(r"\{[^{}]*\}")
 _NESTED_FIELD_RE = re.compile(r":[^{}]*\{")
 
 
+# Currency symbols and the spaces spreadsheets group digits with.
+_NUMBER_NOISE = str.maketrans("", "", "$€£¥ \t\r\n\u00a0\u202f")
+_PLAIN_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?|\.\d+")
+# 1,234,567.89 and the Indian 12,34,567.89.
+_COMMA_GROUPED_RE = re.compile(r"\d{1,3}(?:,\d{2,3})*,\d{3}(?:\.\d+)?")
+# 1.234.567,89 and 1.234,5; a lone "1.234" is a plain decimal above.
+_DOT_GROUPED_RE = re.compile(r"\d{1,3}(?:\.\d{3})+,\d+|\d{1,3}(?:\.\d{3}){2,}")
+_DECIMAL_COMMA_RE = re.compile(r"\d+,\d+")
+
+
+def _number_text(value: str) -> str | None:
+    """Plain decimal text for a number written the way a spreadsheet shows it.
+
+    "$1,234.50" -> "1234.50", "(45.00)" -> "-45.00", "1.234,50 €" -> "1234.50".
+    A CSV export writes the displayed text, so currency-formatted columns
+    arrive as these strings. Returns None for anything else, never a guess:
+    "1,234" is read as thousands, and a mixed or partial form stays text.
+    """
+    text = value.strip().translate(_NUMBER_NOISE)
+    negative = False
+    if len(text) > 2 and text[0] == "(" and text[-1] == ")":
+        negative, text = True, text[1:-1]
+    if text[:1] in {"-", "+"}:
+        negative, text = negative ^ (text[0] == "-"), text[1:]
+    if _PLAIN_NUMBER_RE.fullmatch(text):
+        pass
+    elif _COMMA_GROUPED_RE.fullmatch(text):
+        text = text.replace(",", "")
+    elif _DOT_GROUPED_RE.fullmatch(text):
+        text = text.replace(".", "").replace(",", ".")
+    elif _DECIMAL_COMMA_RE.fullmatch(text):
+        text = text.replace(",", ".")
+    else:
+        return None
+    return f"-{text}" if negative else text
+
+
 def _to_number(x) -> float | None:
-    """float(x) for the formatting filters, or None if x is not a finite number."""
+    """float(x) for the formatting filters, or None if x is not a finite number.
+
+    Text that float() refuses gets one more try as a displayed number
+    ("$1,234.50"), the same forms sumcol totals.
+    """
     try:
         v = float(x)
     except (TypeError, ValueError, OverflowError):
-        return None
+        text = _number_text(x) if isinstance(x, str) and len(x) <= 64 else None
+        if text is None:
+            return None
+        v = float(text)
     return v if math.isfinite(v) else None
 
 
@@ -198,19 +242,13 @@ def sumcol(items, key):
         value = item.get(key)
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
-        negative = False
         if isinstance(value, str):
-            value = value.strip().translate(
-                str.maketrans("", "", "$€£, \t\r\n\u00a0\u202f")
-            )
-            if len(value) > 1 and value.startswith("(") and value.endswith(")"):
-                negative = True
-                value = value[1:-1]
+            value = _number_text(value) or value.strip()
         try:
             parsed = Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError):
             continue
-        total += -parsed if negative else parsed
+        total += parsed
     return float(total)
 
 
@@ -231,6 +269,8 @@ def comma2(x):
 
 
 def pct(x):
+    if isinstance(x, str) and x.strip().endswith("%"):
+        x = x.strip()[:-1]
     v = _to_number(x)
     if v is None:
         return ""

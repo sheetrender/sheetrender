@@ -5,6 +5,11 @@
 - A blank cell (`None`) prints as empty text instead of the word "None", in
   templates and in `render_text`/`render_filename`. `{% if x %}` and
   `x is none` still see `None`.
+- `money`, `money2`, `money_k`, `comma`, `comma2` and `pct` read numbers
+  written the way a spreadsheet displays them: `"$1,234.50"`, `"(45.00)"`,
+  `"1.234,50 €"`, `"99,90"`, `"1,23,456"`, and `pct` also `"89%"`. They used
+  to return empty text for these. `sumcol` shares the parser, so `"1.234,50"`
+  now totals as 1234.5 instead of 1.2345.
 
 ## 0.4.0
 
