@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv as _csv
 import re
 from collections.abc import Iterable, Iterator, Sequence
-from datetime import date
+from datetime import date, time, timedelta
 from typing import Any
 
 from openpyxl import load_workbook
@@ -64,12 +64,20 @@ def _is_empty_row(values: tuple[Any, ...]) -> bool:
     return all(v is None for v in values)
 
 
+def _json_cell(value: Any) -> Any:
+    # Time-of-day (09:30) and duration ([h]:mm) cells come out of openpyxl as
+    # time and timedelta; left alone they make sample_rows unserialisable.
+    # The text matches what a template prints for the native value.
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return str(value)
+    return value
+
+
 def _json_row(keys: list[str], values: tuple[Any, ...]) -> dict[str, Any]:
     # Only preview samples cross the JSON boundary; iter_rows preserves cells.
-    return {
-        key: value.isoformat() if isinstance(value, date) else value
-        for key, value in zip(keys, values, strict=True)
-    }
+    return {key: _json_cell(value) for key, value in zip(keys, values, strict=True)}
 
 
 def _xlsx_data_rows(rows: Iterable[Sequence[Any]], width: int) -> Iterator[tuple[Any, ...]]:

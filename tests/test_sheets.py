@@ -143,3 +143,32 @@ def test_date_detection_stops_at_5000_rows(tmp_path):
     assert [column["inferred_type"] for column in result["columns"]] == [
         "number", "date", "string", "string", "string",
     ]
+
+
+def test_time_and_duration_cells_keep_sample_rows_json(tmp_path):
+    """openpyxl reads 09:30 as datetime.time and [h]:mm as timedelta; either one
+    in the first rows made the dataset's sample rows unserialisable."""
+    import json
+    from datetime import time, timedelta
+
+    from openpyxl import Workbook
+
+    from sheetrender.sheets import iter_rows
+    from sheetrender.templating import render_row
+
+    path = tmp_path / "appointments.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Client", "Appointment time", "Hours"])
+    sheet.append(["Ann", time(9, 30), timedelta(hours=1, minutes=30)])
+    workbook.save(path)
+
+    result = parse_xlsx(str(path))
+
+    json.dumps(result)
+    assert result["sample_rows"][0] == {
+        "client": "Ann", "appointment_time": "09:30:00", "hours": "1:30:00",
+    }
+    row = next(iter_rows(str(path), result["columns"]))
+    template = "{{ appointment_time }} {{ hours }}"
+    assert render_row(template, row) == render_row(template, result["sample_rows"][0])
