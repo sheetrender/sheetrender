@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - **Stored datasets read exactly as 0.4.0 read them.** `parse_xlsx` and
   `parse_csv` return a new `read_options` value (`{"version": 2,
