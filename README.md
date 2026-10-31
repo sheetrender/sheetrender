@@ -1,12 +1,14 @@
-# SheetRender
+# SheetRender engine
 
-**Spreadsheet + HTML template in, a stack of PDFs out.**
+**The open-source PDF render engine behind [sheetrender.com](https://sheetrender.com).**
 
-SheetRender turns a CSV or XLSX file and an HTML template into one
+Want PDFs from a spreadsheet without writing code? Use the SheetRender app at
+[sheetrender.com](https://sheetrender.com).
+
+This library turns a CSV or XLSX file and an HTML template into one
 well-paginated PDF per row, or per group of rows for documents with line items
-like invoices and statements. It's the same rendering engine that runs
-[sheetrender.com](https://sheetrender.com), pulled out as a standalone MIT
-library and CLI.
+like invoices and statements. It's the same code the SheetRender app renders
+with, released as a standalone MIT library and CLI.
 
 ```sh
 git clone https://github.com/sheetrender/sheetrender && cd sheetrender
